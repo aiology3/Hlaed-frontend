@@ -1,7 +1,103 @@
 import { useState, useRef, useEffect } from "react";
 
-// ✅ Points to YOUR backend — API key is safe on the server
 const API_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+
+// ─── Load Mermaid from CDN ─────────────────────────────────────────────────────
+let mermaidLoaded = false;
+const loadMermaid = () => new Promise((resolve) => {
+  if (mermaidLoaded) { resolve(window.mermaid); return; }
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+  script.onload = () => {
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#0e3d2e",
+        primaryTextColor: "#87ceeb",
+        primaryBorderColor: "#87ceeb",
+        lineColor: "#2d9e6b",
+        secondaryColor: "#071a12",
+        tertiaryColor: "#0a2a1e",
+        background: "#050e09",
+        mainBkg: "#0e3d2e",
+        nodeBorder: "#87ceeb",
+        clusterBkg: "#071a12",
+        titleColor: "#87ceeb",
+        edgeLabelBackground: "#0a2a1e",
+        fontFamily: "DM Mono, monospace",
+      },
+    });
+    mermaidLoaded = true;
+    resolve(window.mermaid);
+  };
+  document.head.appendChild(script);
+});
+
+// ─── Mermaid chart renderer component ─────────────────────────────────────────
+const MermaidChart = ({ code }) => {
+  const ref = useRef(null);
+  const [svg, setSvg] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadMermaid().then(async (mermaid) => {
+      try {
+        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+        const { svg: rendered } = await mermaid.render(id, code);
+        setSvg(rendered);
+      } catch (e) {
+        setError("Could not render flowchart. Check the diagram syntax.");
+      }
+    });
+  }, [code]);
+
+  if (error) return (
+    <div style={{color:"#e88",fontSize:12,padding:"8px 12px",
+      background:"rgba(200,80,80,.08)",borderRadius:8,marginTop:8}}>{error}</div>
+  );
+
+  if (!svg) return (
+    <div style={{color:"#4a9a6a",fontSize:11,padding:"8px",letterSpacing:"0.1em"}}>
+      RENDERING FLOWCHART...
+    </div>
+  );
+
+  return (
+    <div style={{
+      marginTop:12, padding:16,
+      background:"rgba(135,206,235,0.04)",
+      border:"1px solid rgba(135,206,235,0.15)",
+      borderRadius:12, overflowX:"auto",
+      boxShadow:"0 4px 20px rgba(0,0,0,0.3)",
+    }}>
+      <div style={{fontSize:10,color:"#2d9e6b",letterSpacing:"0.15em",marginBottom:10}}>
+        ◈ FLOWCHART
+      </div>
+      <div dangerouslySetInnerHTML={{ __html: svg }}
+        style={{display:"flex",justifyContent:"center"}}/>
+    </div>
+  );
+};
+
+// ─── Parse message for mermaid blocks ─────────────────────────────────────────
+const parseMermaid = (content) => {
+  const parts = [];
+  const regex = /```mermaid\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", content: content.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: "mermaid", content: match[1].trim() });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < content.length) {
+    parts.push({ type: "text", content: content.slice(lastIndex) });
+  }
+  return parts.length > 0 ? parts : [{ type: "text", content }];
+};
 
 // ─── Static logo ───────────────────────────────────────────────────────────────
 const HlaedLogo = ({ size = 40 }) => (
@@ -125,6 +221,8 @@ const SmilingEye = ({ size = 34 }) => (
 // ─── Message bubble ────────────────────────────────────────────────────────────
 const MessageBlock = ({ msg, isLatest }) => {
   const isUser = msg.role === "user";
+  const parts = isUser ? null : parseMermaid(msg.content);
+
   return (
     <div style={{display:"flex",justifyContent:isUser?"flex-end":"flex-start",
       marginBottom:"20px",animation:"fadeSlideIn 0.3s ease forwards"}}>
@@ -135,15 +233,40 @@ const MessageBlock = ({ msg, isLatest }) => {
           <SmilingEye size={34}/>
         </div>
       )}
-      <div style={{maxWidth:"72%",
-        background:isUser?"linear-gradient(135deg,#0e5c3a,#0a3d28)":"rgba(135,206,235,0.05)",
-        border:isUser?"1px solid rgba(135,206,235,0.25)":"1px solid rgba(135,206,235,0.12)",
-        borderRadius:isUser?"18px 18px 4px 18px":"4px 18px 18px 18px",
-        padding:"12px 16px",color:isUser?"#d8f4e8":"#b8dde8",
-        fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",
-        fontFamily:"'DM Mono','Courier New',monospace",
-        boxShadow:isUser?"0 4px 20px rgba(14,92,58,0.35)":"0 2px 12px rgba(0,0,0,0.25)"}}>
-        {msg.content}
+      <div style={{maxWidth:"78%"}}>
+        {isUser ? (
+          <div style={{
+            background:"linear-gradient(135deg,#0e5c3a,#0a3d28)",
+            border:"1px solid rgba(135,206,235,0.25)",
+            borderRadius:"18px 18px 4px 18px",
+            padding:"12px 16px",color:"#d8f4e8",
+            fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",
+            fontFamily:"'DM Mono','Courier New',monospace",
+            boxShadow:"0 4px 20px rgba(14,92,58,0.35)"}}>
+            {msg.content}
+          </div>
+        ) : (
+          <div>
+            {parts.map((part, i) =>
+              part.type === "mermaid" ? (
+                <MermaidChart key={i} code={part.content}/>
+              ) : (
+                <div key={i} style={{
+                  background:"rgba(135,206,235,0.05)",
+                  border:"1px solid rgba(135,206,235,0.12)",
+                  borderRadius:"4px 18px 18px 18px",
+                  padding:"12px 16px",color:"#b8dde8",
+                  fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",
+                  fontFamily:"'DM Mono','Courier New',monospace",
+                  boxShadow:"0 2px 12px rgba(0,0,0,0.25)",
+                  marginBottom: parts.length > 1 ? 8 : 0,
+                }}>
+                  {part.content}
+                </div>
+              )
+            )}
+          </div>
+        )}
       </div>
       {isUser && (
         <div style={{width:34,height:34,borderRadius:"50%",
@@ -173,7 +296,6 @@ export default function HlaedApp() {
     const newMessages = [...messages, { role:"user", content:trimmed }];
     setMessages(newMessages); setInput(""); setIsLoading(true); setError(null);
     try {
-      // ✅ Calls YOUR backend — not Anthropic directly
       const res = await fetch(`${API_URL}/api/chat`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -192,7 +314,7 @@ export default function HlaedApp() {
   };
 
   const clearChat = () => { setMessages([]); setError(null); };
-  const suggestions = ["Plan a product roadmap","Design a system architecture","Break down a research goal"];
+  const suggestions = ["Create a flowchart for user login process","Plan a product roadmap","Design a system architecture"];
   const latestAsstIdx = messages.reduce((acc,m,i)=> m.role==="assistant" ? i : acc, -1);
 
   return (
@@ -216,6 +338,7 @@ export default function HlaedApp() {
         @keyframes lid-R{0%,38%,54%,100%{ry:0}44%,48%{ry:9}}
         textarea:focus{outline:none}
         button{transition:all .2s}button:hover{opacity:.85}button:active{transform:scale(.97)}
+        .mermaid-chart svg{max-width:100%;height:auto;}
       `}</style>
 
       {/* BG */}
@@ -275,8 +398,8 @@ export default function HlaedApp() {
               background:"linear-gradient(135deg,#87ceeb 30%,#2d9e6b 100%)",
               WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:"0.15em"}}>HLAED</div>
             <div style={{fontSize:12,color:"#4a9a6a",textAlign:"center",
-              maxWidth:360,lineHeight:1.9,letterSpacing:"0.04em"}}>
-              Multi-step reasoning & planning agent.<br/>
+              maxWidth:380,lineHeight:1.9,letterSpacing:"0.04em"}}>
+              Multi-step reasoning, planning & flowchart agent.<br/>
               Built by Hlaed — pioneering AI & cybersecurity from India.
             </div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center",marginTop:4}}>
@@ -316,7 +439,7 @@ export default function HlaedApp() {
           borderRadius:16,padding:"10px 14px"}}>
           <textarea ref={textareaRef} value={input}
             onChange={e=>setInput(e.target.value)} onKeyDown={handleKeyDown}
-            placeholder="Describe a task or problem for Hlaed to reason through..."
+            placeholder="Ask Hlaed anything or say 'create a flowchart for...'"
             rows={1} style={{flex:1,background:"transparent",border:"none",
               color:"#d8eff8",fontSize:14,resize:"none",
               fontFamily:"'DM Mono',monospace",lineHeight:1.6,
