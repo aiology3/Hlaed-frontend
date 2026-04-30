@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, orderBy, query, serverTimestamp, getDoc, setDoc,
+  doc, onSnapshot, orderBy, query, serverTimestamp, getDoc,
 } from "firebase/firestore";
 import LoginPage from "./components/LoginPage";
 import Sidebar from "./components/Sidebar";
@@ -32,9 +32,12 @@ const loadMermaid = () => new Promise((resolve) => {
   document.head.appendChild(s);
 });
 
+// ─── Mermaid chart with copy button ───────────────────────────────────────────
 const MermaidChart = ({ code }) => {
   const [svg, setSvg] = useState("");
   const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     loadMermaid().then(async m => {
       try {
@@ -44,16 +47,64 @@ const MermaidChart = ({ code }) => {
       } catch { setErr("Could not render flowchart."); }
     });
   }, [code]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   if (err) return <div style={{color:"#e88",fontSize:12,padding:"8px 12px",background:"rgba(200,80,80,.08)",borderRadius:8,marginTop:8}}>{err}</div>;
   if (!svg) return <div style={{color:"#4a9a6a",fontSize:11,padding:"8px",letterSpacing:"0.1em"}}>RENDERING...</div>;
+
   return (
     <div style={{marginTop:12,padding:16,background:"rgba(135,206,235,0.04)",border:"1px solid rgba(135,206,235,0.15)",borderRadius:12,overflowX:"auto",boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
-      <div style={{fontSize:10,color:"#2d9e6b",letterSpacing:"0.15em",marginBottom:10}}>◈ FLOWCHART</div>
+      {/* Header row with label + copy button */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{fontSize:10,color:"#2d9e6b",letterSpacing:"0.15em"}}>◈ FLOWCHART</div>
+        <button onClick={handleCopy} style={{
+          display:"flex",alignItems:"center",gap:6,
+          background: copied ? "rgba(45,158,107,0.2)" : "rgba(135,206,235,0.08)",
+          border: `1px solid ${copied ? "rgba(45,158,107,0.4)" : "rgba(135,206,235,0.2)"}`,
+          borderRadius:8, color: copied ? "#2d9e6b" : "#87ceeb",
+          padding:"5px 12px", fontSize:10, cursor:"pointer",
+          fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em",
+          transition:"all .2s",
+        }}>
+          <span>{copied ? "✓" : "⎘"}</span>
+          {copied ? "COPIED!" : "COPY CODE"}
+        </button>
+      </div>
       <div dangerouslySetInnerHTML={{__html:svg}} style={{display:"flex",justifyContent:"center"}}/>
     </div>
   );
 };
 
+// ─── Copy button for regular text answers ─────────────────────────────────────
+const CopyButton = ({ text }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button onClick={handleCopy} style={{
+      display:"flex",alignItems:"center",gap:4,
+      background:"transparent", border:"1px solid rgba(135,206,235,0.12)",
+      borderRadius:6, color: copied ? "#2d9e6b" : "#4a7a5a",
+      padding:"3px 8px", fontSize:9, cursor:"pointer",
+      fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em",
+      transition:"all .2s", marginTop:8, alignSelf:"flex-end",
+    }}>
+      {copied ? "✓ COPIED" : "⎘ COPY"}
+    </button>
+  );
+};
+
+// ─── Parse mermaid blocks ──────────────────────────────────────────────────────
 const parseMermaid = (content) => {
   const parts=[]; const regex=/```mermaid\n([\s\S]*?)```/g; let last=0, m;
   while((m=regex.exec(content))!==null){
@@ -87,6 +138,7 @@ const HlaedLogo = ({ size=40 }) => (
   </svg>
 );
 
+// ─── Blinking eyes ─────────────────────────────────────────────────────────────
 const BlinkEye = ({ id, delay }) => (
   <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
     <defs>
@@ -113,6 +165,7 @@ const BlinkingEyes = () => (
   </div>
 );
 
+// ─── Smiling eye ───────────────────────────────────────────────────────────────
 const SmilingEye = ({ size=34 }) => (
   <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
     <defs>
@@ -139,27 +192,69 @@ const SmilingEye = ({ size=34 }) => (
   </svg>
 );
 
-const MessageBlock = ({ msg, isLatest }) => {
+// ─── Streaming cursor ──────────────────────────────────────────────────────────
+const StreamCursor = () => (
+  <span style={{
+    display:"inline-block", width:2, height:"1em",
+    background:"#87ceeb", marginLeft:2, verticalAlign:"middle",
+    animation:"cursorBlink 0.7s steps(1) infinite",
+  }}/>
+);
+
+// ─── Message bubble ────────────────────────────────────────────────────────────
+const MessageBlock = ({ msg, isLatest, isStreaming }) => {
   const isUser = msg.role==="user";
   const parts = isUser ? null : parseMermaid(msg.content);
+
   return (
     <div style={{display:"flex",justifyContent:isUser?"flex-end":"flex-start",marginBottom:"20px",animation:"fadeSlideIn 0.3s ease forwards"}}>
-      {!isUser&&<div style={{marginRight:10,flexShrink:0,marginTop:2,filter:isLatest?"drop-shadow(0 0 10px rgba(135,206,235,0.5))":"none",transition:"filter 0.5s ease"}}><SmilingEye size={34}/></div>}
+      {!isUser&&(
+        <div style={{marginRight:10,flexShrink:0,marginTop:2,filter:isLatest?"drop-shadow(0 0 10px rgba(135,206,235,0.5))":"none",transition:"filter 0.5s ease"}}>
+          <SmilingEye size={34}/>
+        </div>
+      )}
       <div style={{maxWidth:"75%"}}>
         {isUser ? (
           <div style={{background:"linear-gradient(135deg,#0e5c3a,#0a3d28)",border:"1px solid rgba(135,206,235,0.25)",borderRadius:"18px 18px 4px 18px",padding:"12px 16px",color:"#d8f4e8",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",boxShadow:"0 4px 20px rgba(14,92,58,0.35)"}}>
             {msg.content}
           </div>
         ) : (
-          <div>
+          <div style={{display:"flex",flexDirection:"column"}}>
             {parts.map((p,i) => p.type==="mermaid"
               ? <MermaidChart key={i} code={p.content}/>
-              : <div key={i} style={{background:"rgba(135,206,235,0.05)",border:"1px solid rgba(135,206,235,0.12)",borderRadius:"4px 18px 18px 18px",padding:"12px 16px",color:"#b8dde8",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",boxShadow:"0 2px 12px rgba(0,0,0,0.25)",marginBottom:parts.length>1?8:0}}>{p.content}</div>
+              : (
+                <div key={i} style={{position:"relative"}}>
+                  <div style={{background:"rgba(135,206,235,0.05)",border:"1px solid rgba(135,206,235,0.12)",borderRadius:"4px 18px 18px 18px",padding:"12px 16px",color:"#b8dde8",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",boxShadow:"0 2px 12px rgba(0,0,0,0.25)",marginBottom:parts.length>1?8:0}}>
+                    {p.content}{isStreaming && isLatest && i===parts.length-1 && <StreamCursor/>}
+                  </div>
+                  {!isStreaming && p.content.length > 100 && (
+                    <CopyButton text={msg.content}/>
+                  )}
+                </div>
+              )
             )}
           </div>
         )}
       </div>
       {isUser&&<div style={{width:34,height:34,borderRadius:"50%",background:"linear-gradient(135deg,#0e3d2e,#1a6b4a)",border:"1px solid rgba(135,206,235,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,marginLeft:10,flexShrink:0,marginTop:2,color:"#87ceeb"}}>◈</div>}
+    </div>
+  );
+};
+
+// ─── Search status indicator ───────────────────────────────────────────────────
+const SearchIndicator = ({ status, query }) => {
+  if (!status) return null;
+  const configs = {
+    searching: { icon:"🔍", text:`SEARCHING: "${query?.slice(0,40)}..."`, color:"#87ceeb" },
+    done:      { icon:"✓",  text:"SEARCH COMPLETE", color:"#2d9e6b" },
+    failed:    { icon:"⚠",  text:"SEARCH UNAVAILABLE — USING AI KNOWLEDGE", color:"#e8a84a" },
+  };
+  const c = configs[status];
+  if (!c) return null;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 14px",background:`rgba(135,206,235,0.06)`,border:`1px solid rgba(135,206,235,0.18)`,borderRadius:20,marginLeft:44,marginBottom:6,width:"fit-content",animation:"fadeSlideIn 0.2s ease forwards"}}>
+      <span style={{fontSize:12}}>{c.icon}</span>
+      <span style={{fontSize:10,color:c.color,letterSpacing:"0.1em",animation:status==="searching"?"textPulse 1s infinite":"none"}}>{c.text}</span>
     </div>
   );
 };
@@ -173,16 +268,24 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [searchStatus, setSearchStatus] = useState(null); // null | "searching" | "done" | "failed"
+  const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState(null);
+  const [streamingText, setStreamingText] = useState("");
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
+  const activeSessionRef = useRef(null);
+
+  // Keep ref in sync
+  useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
 
   // Auth listener
   useEffect(() => {
     return onAuthStateChanged(auth, u => { setUser(u); setAuthLoading(false); });
   }, []);
 
-  // Load sessions from Firestore
+  // Sessions listener
   useEffect(() => {
     if (!user) { setSessions([]); return; }
     const q = query(collection(db,"users",user.uid,"sessions"), orderBy("updatedAt","desc"));
@@ -191,7 +294,7 @@ export default function App() {
     });
   }, [user]);
 
-  // Load messages when session changes
+  // Messages listener
   useEffect(() => {
     if (!user||!activeSessionId) { setMessages([]); return; }
     const q = query(collection(db,"users",user.uid,"sessions",activeSessionId,"messages"), orderBy("createdAt","asc"));
@@ -200,61 +303,46 @@ export default function App() {
     });
   }, [user, activeSessionId]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [messages, isLoading]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [messages, isLoading, streamingText]);
 
-  // New session
   const handleNewChat = async () => {
     if (!user) return;
-    const ref = await addDoc(collection(db,"users",user.uid,"sessions"), {
-      title:"New Conversation",
-      messageCount:0,
-      createdAt:serverTimestamp(),
-      updatedAt:serverTimestamp(),
+    const ref = await addDoc(collection(db,"users",user.uid,"sessions"),{
+      title:"New Conversation", messageCount:0,
+      createdAt:serverTimestamp(), updatedAt:serverTimestamp(),
     });
-    setActiveSessionId(ref.id);
-    setMessages([]);
-    setError(null);
+    setActiveSessionId(ref.id); setMessages([]); setError(null); setStreamingText("");
   };
 
-  // Select session
-  const handleSelectSession = (id) => {
-    setActiveSessionId(id);
-    setError(null);
-  };
+  const handleSelectSession = (id) => { setActiveSessionId(id); setError(null); setStreamingText(""); };
 
-  // Delete session
   const handleDeleteSession = async (id) => {
     if (!user) return;
     await deleteDoc(doc(db,"users",user.uid,"sessions",id));
-    if (activeSessionId===id) { setActiveSessionId(null); setMessages([]); }
+    if (activeSessionId===id) { setActiveSessionId(null); setMessages([]); setStreamingText(""); }
   };
 
-  // Send message
+  // ── Send message with streaming ───────────────────────────────────────────
   const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed||isLoading||!user) return;
 
     let sessionId = activeSessionId;
-
-    // Auto-create session if none active
     if (!sessionId) {
-      const ref = await addDoc(collection(db,"users",user.uid,"sessions"), {
-        title: trimmed.slice(0,40),
-        messageCount:0,
-        createdAt:serverTimestamp(),
-        updatedAt:serverTimestamp(),
+      const ref = await addDoc(collection(db,"users",user.uid,"sessions"),{
+        title:trimmed.slice(0,40), messageCount:0,
+        createdAt:serverTimestamp(), updatedAt:serverTimestamp(),
       });
       sessionId = ref.id;
       setActiveSessionId(sessionId);
     }
 
     const userMsg = {role:"user",content:trimmed,createdAt:serverTimestamp()};
-    setInput(""); setIsLoading(true); setError(null);
+    setInput(""); setIsLoading(true); setIsStreaming(false);
+    setSearchStatus(null); setSearchQuery(""); setError(null); setStreamingText("");
 
-    // Save user message to Firestore
     await addDoc(collection(db,"users",user.uid,"sessions",sessionId,"messages"), userMsg);
 
-    // Build history for API
     const history = [...messages,{role:"user",content:trimmed}];
 
     try {
@@ -263,43 +351,102 @@ export default function App() {
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({messages:history.map(m=>({role:m.role,content:m.content}))}),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error||"Server error");
-      const text = data.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
 
-      // Save assistant message
-      await addDoc(collection(db,"users",user.uid,"sessions",sessionId,"messages"),{
-        role:"assistant",content:text,createdAt:serverTimestamp(),
-      });
+      if (!res.ok) throw new Error("Server error");
 
-      // Update session metadata
-      const sessionRef = doc(db,"users",user.uid,"sessions",sessionId);
-      const sessionSnap = await getDoc(sessionRef);
-      const count = (sessionSnap.data()?.messageCount||0)+2;
-      await updateDoc(sessionRef,{
-        updatedAt:serverTimestamp(),
-        messageCount:count,
-        title: sessionSnap.data()?.title==="New Conversation" ? trimmed.slice(0,40) : sessionSnap.data()?.title,
-      });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      let streamStarted = false;
 
-    } catch(err) { setError(err.message); }
-    finally { setIsLoading(false); }
+      setIsLoading(false);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+
+          try {
+            const event = JSON.parse(jsonStr);
+
+            if (event.type === "searching") {
+              setSearchStatus("searching");
+              setSearchQuery(event.query || "");
+            }
+            else if (event.type === "search_done") {
+              setSearchStatus("done");
+              setTimeout(() => setSearchStatus(null), 2000);
+            }
+            else if (event.type === "search_failed") {
+              setSearchStatus("failed");
+              setTimeout(() => setSearchStatus(null), 3000);
+            }
+            else if (event.type === "chunk") {
+              if (!streamStarted) { setIsStreaming(true); streamStarted = true; }
+              fullText += event.text;
+              setStreamingText(fullText);
+            }
+            else if (event.type === "done") {
+              setIsStreaming(false);
+              setStreamingText("");
+              setSearchStatus(null);
+
+              // Save to Firestore
+              const sid = activeSessionRef.current || sessionId;
+              await addDoc(collection(db,"users",user.uid,"sessions",sid,"messages"),{
+                role:"assistant", content:fullText, createdAt:serverTimestamp(),
+              });
+              const sessionRef = doc(db,"users",user.uid,"sessions",sid);
+              const snap = await getDoc(sessionRef);
+              const count = (snap.data()?.messageCount||0)+2;
+              await updateDoc(sessionRef,{
+                updatedAt:serverTimestamp(), messageCount:count,
+                title: snap.data()?.title==="New Conversation" ? trimmed.slice(0,40) : snap.data()?.title,
+              });
+            }
+            else if (event.type === "error") {
+              setError(event.message);
+              setIsStreaming(false);
+            }
+          } catch (_) {}
+        }
+      }
+
+    } catch(err) {
+      setError(err.message);
+      setIsLoading(false);
+      setIsStreaming(false);
+    }
   };
 
   const handleKeyDown = e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} };
+
   const latestAsstIdx = messages.reduce((acc,m,i)=>m.role==="assistant"?i:acc,-1);
+  const suggestions = ["What are the latest AI trends in 2026?","Plan a product roadmap","Create a flowchart for user login"];
 
   if (authLoading) return (
     <div style={{minHeight:"100vh",background:"#050e09",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:"#2d9e6b",fontFamily:"'DM Mono',monospace",fontSize:12,letterSpacing:"0.2em",animation:"pulse 1.5s infinite"}}>
-        LOADING HLAED...
-      </div>
+      <div style={{color:"#2d9e6b",fontFamily:"'DM Mono',monospace",fontSize:12,letterSpacing:"0.2em",animation:"pulse 1.5s infinite"}}>LOADING HLAED...</div>
     </div>
   );
 
   if (!user) return <LoginPage/>;
 
-  const suggestions = ["Create a flowchart for user login process","Plan a product roadmap","Design a system architecture"];
+  // Build display messages — append streaming message if active
+  const displayMessages = isStreaming && streamingText
+    ? [...messages, { id:"streaming", role:"assistant", content:streamingText }]
+    : messages;
+
+  const displayLatestIdx = displayMessages.reduce((acc,m,i)=>m.role==="assistant"?i:acc,-1);
 
   return (
     <div style={{height:"100vh",background:"#050e09",display:"flex",fontFamily:"'DM Mono',monospace",color:"#b8dde8",overflow:"hidden"}}>
@@ -317,17 +464,14 @@ export default function App() {
         @keyframes lid-L{0%,35%,50%,100%{ry:0}41%,45%{ry:9}}
         @keyframes blink-R{0%,38%,54%,100%{transform:scaleY(1)}44%,48%{transform:scaleY(0.06)}}
         @keyframes lid-R{0%,38%,54%,100%{ry:0}44%,48%{ry:9}}
+        @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
         textarea:focus{outline:none} button{transition:all .2s} button:hover{opacity:.85} button:active{transform:scale(.97)}
       `}</style>
 
-      {/* Sidebar */}
       <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId}
         onNewChat={handleNewChat} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession}/>
 
-      {/* Main chat area */}
       <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"}}>
-
-        {/* BG */}
         <div style={{position:"absolute",inset:0,pointerEvents:"none",backgroundImage:`linear-gradient(rgba(135,206,235,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(135,206,235,.03) 1px,transparent 1px)`,backgroundSize:"40px 40px",animation:"floatGrid 8s ease-in-out infinite"}}/>
         <div style={{position:"absolute",top:"-15%",right:"-10%",width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(14,92,58,.15) 0%,transparent 70%)",pointerEvents:"none"}}/>
         <div style={{position:"absolute",left:0,right:0,height:"2px",background:"linear-gradient(90deg,transparent,rgba(135,206,235,.08),transparent)",animation:"scanline 6s linear infinite",pointerEvents:"none",zIndex:1}}/>
@@ -338,35 +482,49 @@ export default function App() {
             <div style={{filter:"drop-shadow(0 0 12px rgba(135,206,235,.4))"}}><HlaedLogo size={42}/></div>
             <div>
               <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:800,background:"linear-gradient(135deg,#87ceeb,#2d9e6b)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:"0.12em"}}>HLAED</div>
-              <div style={{fontSize:9,color:"#2d9e6b",letterSpacing:"0.2em",marginTop:1}}>REASONING · PLANNING · AGENT</div>
+              <div style={{fontSize:9,color:"#2d9e6b",letterSpacing:"0.2em",marginTop:1}}>REASONING · PLANNING · RESEARCH · AGENT</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <div style={{width:7,height:7,borderRadius:"50%",background:isLoading?"#87ceeb":"#2d9e6b",boxShadow:`0 0 8px ${isLoading?"#87ceeb":"#2d9e6b"}`,animation:isLoading?"pulse 1s infinite":"none"}}/>
-            <span style={{fontSize:10,color:isLoading?"#87ceeb":"#2d9e6b",letterSpacing:"0.1em"}}>{isLoading?"THINKING":"ONLINE"}</span>
+            <div style={{width:7,height:7,borderRadius:"50%",background:(isLoading||isStreaming)?"#87ceeb":"#2d9e6b",boxShadow:`0 0 8px ${(isLoading||isStreaming)?"#87ceeb":"#2d9e6b"}`,animation:(isLoading||isStreaming)?"pulse 1s infinite":"none"}}/>
+            <span style={{fontSize:10,color:(isLoading||isStreaming)?"#87ceeb":"#2d9e6b",letterSpacing:"0.1em"}}>
+              {isLoading?"SEARCHING...":isStreaming?"RESPONDING...":"ONLINE"}
+            </span>
           </div>
         </div>
 
         {/* Messages */}
         <div style={{flex:1,overflowY:"auto",padding:"28px 24px",display:"flex",flexDirection:"column",position:"relative",zIndex:5,minHeight:0}}>
-          {messages.length===0&&(
+          {displayMessages.length===0&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,paddingBottom:40,animation:"fadeSlideIn .5s ease forwards"}}>
               <div style={{filter:"drop-shadow(0 0 30px rgba(135,206,235,.5))"}}><HlaedLogo size={72}/></div>
               <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,fontWeight:800,background:"linear-gradient(135deg,#87ceeb 30%,#2d9e6b 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:"0.15em"}}>HLAED</div>
-              <div style={{fontSize:12,color:"#4a9a6a",textAlign:"center",maxWidth:380,lineHeight:1.9,letterSpacing:"0.04em"}}>
-                Multi-step reasoning, planning & flowchart agent.<br/>Built by Hlaed — pioneering AI & cybersecurity from India.
+              <div style={{fontSize:12,color:"#4a9a6a",textAlign:"center",maxWidth:400,lineHeight:1.9,letterSpacing:"0.04em"}}>
+                Professional AI research, reasoning & planning agent.<br/>
+                Built by Hlaed — pioneering AI & cybersecurity from India 🇮🇳
               </div>
               <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center",marginTop:4}}>
-                {suggestions.map(s=>(
-                  <button key={s} onClick={()=>setInput(s)} style={{background:"rgba(135,206,235,.06)",border:"1px solid rgba(135,206,235,.18)",borderRadius:20,color:"#87ceeb",padding:"7px 18px",fontSize:11,cursor:"pointer",letterSpacing:"0.06em",fontFamily:"'DM Mono',monospace"}}>{s}</button>
-                ))}
+                {suggestions.map(s=>(<button key={s} onClick={()=>setInput(s)} style={{background:"rgba(135,206,235,.06)",border:"1px solid rgba(135,206,235,.18)",borderRadius:20,color:"#87ceeb",padding:"7px 18px",fontSize:11,cursor:"pointer",letterSpacing:"0.06em",fontFamily:"'DM Mono',monospace"}}>{s}</button>))}
               </div>
             </div>
           )}
 
-          {messages.map((msg,i)=>(<MessageBlock key={msg.id||i} msg={msg} isLatest={i===latestAsstIdx}/>))}
+          {displayMessages.map((msg,i)=>(
+            <MessageBlock
+              key={msg.id||i}
+              msg={msg}
+              isLatest={i===displayLatestIdx}
+              isStreaming={isStreaming && msg.id==="streaming"}
+            />
+          ))}
 
-          {isLoading&&<div style={{display:"flex",alignItems:"flex-start",marginBottom:20}}><BlinkingEyes/></div>}
+          {/* Search + thinking indicators */}
+          {(isLoading||searchStatus)&&(
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20}}>
+              <SearchIndicator status={searchStatus} query={searchQuery}/>
+              {isLoading&&<BlinkingEyes/>}
+            </div>
+          )}
 
           {error&&<div style={{background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.2)",borderRadius:10,padding:"12px 16px",color:"#e88",fontSize:13,marginBottom:16,animation:"fadeSlideIn .3s ease forwards"}}>⚠ {error}</div>}
           <div ref={bottomRef}/>
@@ -377,13 +535,13 @@ export default function App() {
           <div style={{display:"flex",gap:12,alignItems:"flex-end",background:"rgba(135,206,235,.04)",border:"1px solid rgba(135,206,235,.15)",borderRadius:16,padding:"10px 14px"}}>
             <textarea ref={textareaRef} value={input}
               onChange={e=>setInput(e.target.value)} onKeyDown={handleKeyDown}
-              placeholder="Ask Hlaed anything or say 'create a flowchart for...'"
+              placeholder="Ask Hlaed anything — research, planning, flowcharts..."
               rows={1} style={{flex:1,background:"transparent",border:"none",color:"#d8eff8",fontSize:14,resize:"none",fontFamily:"'DM Mono',monospace",lineHeight:1.6,maxHeight:140,overflowY:"auto",caretColor:"#87ceeb"}}
               onInput={e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,140)+"px";}}/>
-            <button onClick={sendMessage} disabled={!input.trim()||isLoading} style={{background:input.trim()&&!isLoading?"linear-gradient(135deg,#0e5c3a,#1a8a5a)":"rgba(255,255,255,.04)",border:`1px solid ${input.trim()&&!isLoading?"rgba(135,206,235,.3)":"rgba(255,255,255,.06)"}`,borderRadius:12,color:input.trim()&&!isLoading?"#87ceeb":"#2a4a35",width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",cursor:input.trim()&&!isLoading?"pointer":"not-allowed",fontSize:18,flexShrink:0,boxShadow:input.trim()&&!isLoading?"0 4px 16px rgba(135,206,235,.2)":"none"}}>↑</button>
+            <button onClick={sendMessage} disabled={!input.trim()||isLoading||isStreaming} style={{background:input.trim()&&!isLoading&&!isStreaming?"linear-gradient(135deg,#0e5c3a,#1a8a5a)":"rgba(255,255,255,.04)",border:`1px solid ${input.trim()&&!isLoading&&!isStreaming?"rgba(135,206,235,.3)":"rgba(255,255,255,.06)"}`,borderRadius:12,color:input.trim()&&!isLoading&&!isStreaming?"#87ceeb":"#2a4a35",width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",cursor:input.trim()&&!isLoading&&!isStreaming?"pointer":"not-allowed",fontSize:18,flexShrink:0,boxShadow:input.trim()&&!isLoading&&!isStreaming?"0 4px 16px rgba(135,206,235,.2)":"none"}}>↑</button>
           </div>
           <div style={{fontSize:10,color:"#1a4a2a",marginTop:8,textAlign:"center",letterSpacing:"0.1em"}}>
-            SHIFT+ENTER NEW LINE · ENTER SEND · HLAED v2.0 · BY HLAED COMPANY</div>
+            SHIFT+ENTER NEW LINE · ENTER SEND · HLAED v3.0 · BY HLAED COMPANY</div>
         </div>
       </div>
     </div>
