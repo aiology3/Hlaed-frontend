@@ -32,11 +32,12 @@ const loadMermaid = () => new Promise((resolve) => {
   document.head.appendChild(s);
 });
 
-// ─── Mermaid chart with copy button ───────────────────────────────────────────
+// ─── Mermaid chart — copy as PNG image ────────────────────────────────────────
 const MermaidChart = ({ code }) => {
   const [svg, setSvg] = useState("");
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
+  const svgRef = useRef(null);
 
   useEffect(() => {
     loadMermaid().then(async m => {
@@ -48,64 +49,303 @@ const MermaidChart = ({ code }) => {
     });
   }, [code]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+  // Copy flowchart as PNG image to clipboard
+  const handleCopyFlowchart = async () => {
+    if (!svgRef.current) return;
+    try {
+      const svgEl = svgRef.current.querySelector("svg");
+      if (!svgEl) return;
+
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const canvas = document.createElement("canvas");
+      const scale = 2; // retina quality
+      const width = svgEl.getBoundingClientRect().width || 800;
+      const height = svgEl.getBoundingClientRect().height || 400;
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#050e09"; // Hlaed dark background
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+
+      const img = new Image();
+      const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+
+      img.onload = async () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+
+        canvas.toBlob(async (pngBlob) => {
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png": pngBlob }),
+            ]);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2500);
+          } catch {
+            // Fallback: download as PNG
+            const a = document.createElement("a");
+            a.href = canvas.toDataURL("image/png");
+            a.download = "hlaed-flowchart.png";
+            a.click();
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2500);
+          }
+        }, "image/png");
+      };
+      img.src = url;
+    } catch (e) {
+      console.error("Copy failed:", e);
+    }
   };
 
   if (err) return <div style={{color:"#e88",fontSize:12,padding:"8px 12px",background:"rgba(200,80,80,.08)",borderRadius:8,marginTop:8}}>{err}</div>;
-  if (!svg) return <div style={{color:"#4a9a6a",fontSize:11,padding:"8px",letterSpacing:"0.1em"}}>RENDERING...</div>;
+  if (!svg) return <div style={{color:"#4a9a6a",fontSize:11,padding:"8px",letterSpacing:"0.1em"}}>RENDERING FLOWCHART...</div>;
 
   return (
     <div style={{marginTop:12,padding:16,background:"rgba(135,206,235,0.04)",border:"1px solid rgba(135,206,235,0.15)",borderRadius:12,overflowX:"auto",boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
-      {/* Header row with label + copy button */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
         <div style={{fontSize:10,color:"#2d9e6b",letterSpacing:"0.15em"}}>◈ FLOWCHART</div>
-        <button onClick={handleCopy} style={{
+        <button onClick={handleCopyFlowchart} style={{
           display:"flex",alignItems:"center",gap:6,
           background: copied ? "rgba(45,158,107,0.2)" : "rgba(135,206,235,0.08)",
           border: `1px solid ${copied ? "rgba(45,158,107,0.4)" : "rgba(135,206,235,0.2)"}`,
           borderRadius:8, color: copied ? "#2d9e6b" : "#87ceeb",
           padding:"5px 12px", fontSize:10, cursor:"pointer",
-          fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em",
-          transition:"all .2s",
+          fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em", transition:"all .2s",
         }}>
           <span>{copied ? "✓" : "⎘"}</span>
-          {copied ? "COPIED!" : "COPY CODE"}
+          {copied ? "COPIED AS IMAGE!" : "COPY FLOWCHART"}
         </button>
       </div>
-      <div dangerouslySetInnerHTML={{__html:svg}} style={{display:"flex",justifyContent:"center"}}/>
+      <div ref={svgRef} dangerouslySetInnerHTML={{__html:svg}} style={{display:"flex",justifyContent:"center"}}/>
     </div>
   );
 };
 
-// ─── Copy button for regular text answers ─────────────────────────────────────
-const CopyButton = ({ text }) => {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-  return (
-    <button onClick={handleCopy} style={{
-      display:"flex",alignItems:"center",gap:4,
-      background:"transparent", border:"1px solid rgba(135,206,235,0.12)",
-      borderRadius:6, color: copied ? "#2d9e6b" : "#4a7a5a",
-      padding:"3px 8px", fontSize:9, cursor:"pointer",
-      fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em",
-      transition:"all .2s", marginTop:8, alignSelf:"flex-end",
-    }}>
-      {copied ? "✓ COPIED" : "⎘ COPY"}
-    </button>
-  );
+// ─── Markdown renderer — converts ** ## tables --- to clean HTML ───────────────
+const renderMarkdown = (text, isStreaming) => {
+  const lines = text.split("\n");
+  const elements = [];
+  let i = 0;
+  let keyCounter = 0;
+  const key = () => keyCounter++;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // ── Table detection ──────────────────────────────────────────────────────
+    if (line.includes("|") && i + 1 < lines.length && lines[i+1].replace(/[\|\-\:\s]/g,"").length === 0 && lines[i+1].includes("-")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].includes("|")) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      // Parse header
+      const headers = tableLines[0].split("|").filter(c => c.trim() !== "").map(c => c.trim());
+      // Skip separator line (---)
+      const rows = tableLines.slice(2).map(row =>
+        row.split("|").filter(c => c.trim() !== "").map(c => c.trim())
+      );
+      elements.push(
+        <div key={key()} style={{overflowX:"auto",marginBottom:16,marginTop:8}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:"'DM Mono',monospace"}}>
+            <thead>
+              <tr>
+                {headers.map((h,hi) => (
+                  <th key={hi} style={{
+                    padding:"10px 14px", textAlign:"left",
+                    background:"rgba(135,206,235,0.1)",
+                    borderBottom:"2px solid rgba(135,206,235,0.3)",
+                    color:"#87ceeb", fontSize:11, letterSpacing:"0.08em",
+                    fontWeight:600, whiteSpace:"nowrap",
+                  }}>{cleanInline(h)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row,ri) => (
+                <tr key={ri} style={{background: ri%2===0 ? "rgba(135,206,235,0.02)" : "transparent"}}>
+                  {row.map((cell,ci) => (
+                    <td key={ci} style={{
+                      padding:"9px 14px",
+                      borderBottom:"1px solid rgba(135,206,235,0.08)",
+                      color: ci===0 ? "#87ceeb" : "#8ab8c8",
+                      fontSize:12, lineHeight:1.6,
+                    }}>{cleanInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // ── Heading H1 ───────────────────────────────────────────────────────────
+    if (line.startsWith("# ")) {
+      elements.push(<h1 key={key()} style={{fontSize:18,fontWeight:700,color:"#87ceeb",marginBottom:12,marginTop:16,letterSpacing:"0.05em",borderBottom:"1px solid rgba(135,206,235,0.2)",paddingBottom:6}}>{cleanInline(line.slice(2))}</h1>);
+      i++; continue;
+    }
+
+    // ── Heading H2 ───────────────────────────────────────────────────────────
+    if (line.startsWith("## ")) {
+      elements.push(<h2 key={key()} style={{fontSize:15,fontWeight:600,color:"#87ceeb",marginBottom:10,marginTop:18,letterSpacing:"0.04em"}}>{cleanInline(line.slice(3))}</h2>);
+      i++; continue;
+    }
+
+    // ── Heading H3 ───────────────────────────────────────────────────────────
+    if (line.startsWith("### ")) {
+      elements.push(<h3 key={key()} style={{fontSize:13,fontWeight:600,color:"#87ceeb",marginBottom:8,marginTop:14,letterSpacing:"0.04em"}}>{cleanInline(line.slice(4))}</h3>);
+      i++; continue;
+    }
+
+    // ── Horizontal rule --- ───────────────────────────────────────────────────
+    if (line.trim() === "---" || line.trim() === "***") {
+      elements.push(<hr key={key()} style={{border:"none",borderTop:"1px solid rgba(135,206,235,0.12)",margin:"16px 0"}}/>);
+      i++; continue;
+    }
+
+    // ── Bullet list * or - ────────────────────────────────────────────────────
+    if (line.match(/^[\*\-] /) || line.match(/^\s+[\*\-] /)) {
+      const listItems = [];
+      while (i < lines.length && (lines[i].match(/^[\*\-] /) || lines[i].match(/^\s+[\*\-] /))) {
+        const indent = lines[i].match(/^(\s*)/)[1].length;
+        const content = lines[i].replace(/^\s*[\*\-] /, "");
+        listItems.push({ content, indent });
+        i++;
+      }
+      elements.push(
+        <ul key={key()} style={{marginBottom:10,marginTop:4,paddingLeft:0,listStyle:"none"}}>
+          {listItems.map((item,li) => (
+            <li key={li} style={{
+              display:"flex", alignItems:"flex-start", gap:8,
+              marginBottom:6, paddingLeft: item.indent > 0 ? 20 : 0,
+              color:"#b8dde8", fontSize:13, lineHeight:1.7,
+            }}>
+              <span style={{color:"#2d9e6b",flexShrink:0,marginTop:2}}>
+                {item.indent > 0 ? "◦" : "◈"}
+              </span>
+              <span>{cleanInlineJSX(item.content)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // ── Numbered list 1. 2. ───────────────────────────────────────────────────
+    if (line.match(/^\d+\. /)) {
+      const listItems = [];
+      while (i < lines.length && lines[i].match(/^\d+\. /)) {
+        const num = lines[i].match(/^(\d+)\. /)[1];
+        const content = lines[i].replace(/^\d+\. /, "");
+        listItems.push({ num, content });
+        i++;
+      }
+      elements.push(
+        <ol key={key()} style={{marginBottom:10,marginTop:4,paddingLeft:0,listStyle:"none"}}>
+          {listItems.map((item,li) => (
+            <li key={li} style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:6,color:"#b8dde8",fontSize:13,lineHeight:1.7}}>
+              <span style={{color:"#87ceeb",flexShrink:0,minWidth:20,fontWeight:600}}>{item.num}.</span>
+              <span>{cleanInlineJSX(item.content)}</span>
+            </li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    // ── Code block ────────────────────────────────────────────────────────────
+    if (line.startsWith("```")) {
+      const lang = line.slice(3).trim();
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      elements.push(
+        <div key={key()} style={{background:"rgba(0,0,0,0.4)",border:"1px solid rgba(135,206,235,0.15)",borderRadius:8,padding:"12px 14px",marginBottom:10,marginTop:4,overflowX:"auto"}}>
+          {lang && <div style={{fontSize:9,color:"#2d9e6b",marginBottom:6,letterSpacing:"0.15em"}}>{lang.toUpperCase()}</div>}
+          <pre style={{margin:0,color:"#87ceeb",fontSize:12,fontFamily:"'DM Mono',monospace",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{codeLines.join("\n")}</pre>
+        </div>
+      );
+      continue;
+    }
+
+    // ── Blockquote > ─────────────────────────────────────────────────────────
+    if (line.startsWith("> ")) {
+      elements.push(
+        <div key={key()} style={{borderLeft:"3px solid #2d9e6b",paddingLeft:12,marginBottom:8,color:"#7ab8a8",fontSize:13,fontStyle:"italic",lineHeight:1.7}}>
+          {cleanInlineJSX(line.slice(2))}
+        </div>
+      );
+      i++; continue;
+    }
+
+    // ── Empty line → spacing ──────────────────────────────────────────────────
+    if (line.trim() === "") {
+      elements.push(<div key={key()} style={{height:8}}/>);
+      i++; continue;
+    }
+
+    // ── Regular paragraph ─────────────────────────────────────────────────────
+    elements.push(
+      <p key={key()} style={{marginBottom:6,color:"#b8dde8",fontSize:13,lineHeight:1.75}}>
+        {cleanInlineJSX(line)}
+        {isStreaming && i === lines.length - 1 && <StreamCursor/>}
+      </p>
+    );
+    i++;
+  }
+
+  return elements;
 };
 
-// ─── Parse mermaid blocks ──────────────────────────────────────────────────────
-const parseMermaid = (content) => {
+// ─── Clean inline markdown (*bold*, _italic_, `code`, [link]) ─────────────────
+const cleanInline = (text) => {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")  // **bold** → plain
+    .replace(/\*(.+?)\*/g, "$1")       // *italic* → plain
+    .replace(/__(.+?)__/g, "$1")       // __bold__ → plain
+    .replace(/_(.+?)_/g, "$1")         // _italic_ → plain
+    .replace(/`(.+?)`/g, "$1")         // `code` → plain
+    .replace(/\[(.+?)\]\(.+?\)/g, "$1"); // [text](url) → text
+};
+
+// ─── Clean inline markdown but return JSX with styled bold/italic/code ────────
+const cleanInlineJSX = (text) => {
+  // Split on **bold**, *italic*, `code`
+  const parts = [];
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  let last = 0;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push({ type:"text", content:text.slice(last, m.index) });
+    if (m[0].startsWith("**")) parts.push({ type:"bold", content:m[2] });
+    else if (m[0].startsWith("*")) parts.push({ type:"italic", content:m[3] });
+    else if (m[0].startsWith("`")) parts.push({ type:"code", content:m[4] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ type:"text", content:text.slice(last) });
+
+  if (parts.length === 0) return text;
+
+  return parts.map((p,i) => {
+    if (p.type === "bold") return <strong key={i} style={{color:"#87ceeb",fontWeight:600}}>{p.content}</strong>;
+    if (p.type === "italic") return <em key={i} style={{color:"#7ab8c8",fontStyle:"italic"}}>{p.content}</em>;
+    if (p.type === "code") return <code key={i} style={{background:"rgba(135,206,235,0.1)",color:"#87ceeb",padding:"1px 5px",borderRadius:4,fontSize:"0.9em",fontFamily:"'DM Mono',monospace"}}>{p.content}</code>;
+    return <span key={i}>{p.content}</span>;
+  });
+};
+
+// ─── Parse content into mermaid + text blocks ──────────────────────────────────
+const parseContent = (content) => {
   const parts=[]; const regex=/```mermaid\n([\s\S]*?)```/g; let last=0, m;
   while((m=regex.exec(content))!==null){
     if(m.index>last) parts.push({type:"text",content:content.slice(last,m.index)});
@@ -138,7 +378,6 @@ const HlaedLogo = ({ size=40 }) => (
   </svg>
 );
 
-// ─── Blinking eyes ─────────────────────────────────────────────────────────────
 const BlinkEye = ({ id, delay }) => (
   <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
     <defs>
@@ -165,7 +404,6 @@ const BlinkingEyes = () => (
   </div>
 );
 
-// ─── Smiling eye ───────────────────────────────────────────────────────────────
 const SmilingEye = ({ size=34 }) => (
   <svg width={size} height={size} viewBox="0 0 80 80" fill="none">
     <defs>
@@ -192,28 +430,50 @@ const SmilingEye = ({ size=34 }) => (
   </svg>
 );
 
-// ─── Streaming cursor ──────────────────────────────────────────────────────────
 const StreamCursor = () => (
-  <span style={{
-    display:"inline-block", width:2, height:"1em",
-    background:"#87ceeb", marginLeft:2, verticalAlign:"middle",
-    animation:"cursorBlink 0.7s steps(1) infinite",
-  }}/>
+  <span style={{display:"inline-block",width:2,height:"1em",background:"#87ceeb",marginLeft:2,verticalAlign:"middle",animation:"cursorBlink 0.7s steps(1) infinite"}}/>
 );
 
-// ─── Message bubble ────────────────────────────────────────────────────────────
+// ─── Copy answer button ────────────────────────────────────────────────────────
+const CopyButton = ({ text }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(()=>setCopied(false),2000); });
+  };
+  return (
+    <button onClick={handleCopy} style={{display:"flex",alignItems:"center",gap:4,background:"transparent",border:"1px solid rgba(135,206,235,0.12)",borderRadius:6,color:copied?"#2d9e6b":"#4a7a5a",padding:"3px 8px",fontSize:9,cursor:"pointer",fontFamily:"'DM Mono',monospace",letterSpacing:"0.08em",transition:"all .2s",marginTop:6,alignSelf:"flex-start"}}>
+      {copied ? "✓ COPIED" : "⎘ COPY ANSWER"}
+    </button>
+  );
+};
+
+// ─── Search indicator ──────────────────────────────────────────────────────────
+const SearchIndicator = ({ status, query: q }) => {
+  if (!status) return null;
+  const cfg = {
+    searching:{ icon:"🔍", text:`SEARCHING: "${(q||"").slice(0,40)}..."`, color:"#87ceeb", pulse:true },
+    done:     { icon:"✓",  text:"SEARCH COMPLETE", color:"#2d9e6b", pulse:false },
+    failed:   { icon:"⚠",  text:"SEARCH UNAVAILABLE — USING AI KNOWLEDGE", color:"#e8a84a", pulse:false },
+  };
+  const c = cfg[status]; if (!c) return null;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 14px",background:"rgba(135,206,235,0.06)",border:"1px solid rgba(135,206,235,0.18)",borderRadius:20,marginLeft:44,marginBottom:6,width:"fit-content",animation:"fadeSlideIn 0.2s ease forwards"}}>
+      <span style={{fontSize:12}}>{c.icon}</span>
+      <span style={{fontSize:10,color:c.color,letterSpacing:"0.1em",animation:c.pulse?"textPulse 1s infinite":"none"}}>{c.text}</span>
+    </div>
+  );
+};
+
+// ─── Message block ─────────────────────────────────────────────────────────────
 const MessageBlock = ({ msg, isLatest, isStreaming }) => {
   const isUser = msg.role==="user";
-  const parts = isUser ? null : parseMermaid(msg.content);
+  const parts = isUser ? null : parseContent(msg.content);
 
   return (
     <div style={{display:"flex",justifyContent:isUser?"flex-end":"flex-start",marginBottom:"20px",animation:"fadeSlideIn 0.3s ease forwards"}}>
-      {!isUser&&(
-        <div style={{marginRight:10,flexShrink:0,marginTop:2,filter:isLatest?"drop-shadow(0 0 10px rgba(135,206,235,0.5))":"none",transition:"filter 0.5s ease"}}>
-          <SmilingEye size={34}/>
-        </div>
-      )}
-      <div style={{maxWidth:"75%"}}>
+      {!isUser&&<div style={{marginRight:10,flexShrink:0,marginTop:2,filter:isLatest?"drop-shadow(0 0 10px rgba(135,206,235,0.5))":"none",transition:"filter 0.5s ease"}}><SmilingEye size={34}/></div>}
+
+      <div style={{maxWidth:"78%"}}>
         {isUser ? (
           <div style={{background:"linear-gradient(135deg,#0e5c3a,#0a3d28)",border:"1px solid rgba(135,206,235,0.25)",borderRadius:"18px 18px 4px 18px",padding:"12px 16px",color:"#d8f4e8",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",boxShadow:"0 4px 20px rgba(14,92,58,0.35)"}}>
             {msg.content}
@@ -223,11 +483,11 @@ const MessageBlock = ({ msg, isLatest, isStreaming }) => {
             {parts.map((p,i) => p.type==="mermaid"
               ? <MermaidChart key={i} code={p.content}/>
               : (
-                <div key={i} style={{position:"relative"}}>
-                  <div style={{background:"rgba(135,206,235,0.05)",border:"1px solid rgba(135,206,235,0.12)",borderRadius:"4px 18px 18px 18px",padding:"12px 16px",color:"#b8dde8",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",boxShadow:"0 2px 12px rgba(0,0,0,0.25)",marginBottom:parts.length>1?8:0}}>
-                    {p.content}{isStreaming && isLatest && i===parts.length-1 && <StreamCursor/>}
+                <div key={i}>
+                  <div style={{background:"rgba(135,206,235,0.05)",border:"1px solid rgba(135,206,235,0.12)",borderRadius:"4px 18px 18px 18px",padding:"14px 18px",marginBottom:parts.length>1?8:0,boxShadow:"0 2px 12px rgba(0,0,0,0.25)"}}>
+                    {renderMarkdown(p.content, isStreaming && isLatest && i===parts.length-1)}
                   </div>
-                  {!isStreaming && p.content.length > 100 && (
+                  {!isStreaming && msg.content.length > 100 && i===0 && (
                     <CopyButton text={msg.content}/>
                   )}
                 </div>
@@ -236,25 +496,8 @@ const MessageBlock = ({ msg, isLatest, isStreaming }) => {
           </div>
         )}
       </div>
-      {isUser&&<div style={{width:34,height:34,borderRadius:"50%",background:"linear-gradient(135deg,#0e3d2e,#1a6b4a)",border:"1px solid rgba(135,206,235,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,marginLeft:10,flexShrink:0,marginTop:2,color:"#87ceeb"}}>◈</div>}
-    </div>
-  );
-};
 
-// ─── Search status indicator ───────────────────────────────────────────────────
-const SearchIndicator = ({ status, query }) => {
-  if (!status) return null;
-  const configs = {
-    searching: { icon:"🔍", text:`SEARCHING: "${query?.slice(0,40)}..."`, color:"#87ceeb" },
-    done:      { icon:"✓",  text:"SEARCH COMPLETE", color:"#2d9e6b" },
-    failed:    { icon:"⚠",  text:"SEARCH UNAVAILABLE — USING AI KNOWLEDGE", color:"#e8a84a" },
-  };
-  const c = configs[status];
-  if (!c) return null;
-  return (
-    <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 14px",background:`rgba(135,206,235,0.06)`,border:`1px solid rgba(135,206,235,0.18)`,borderRadius:20,marginLeft:44,marginBottom:6,width:"fit-content",animation:"fadeSlideIn 0.2s ease forwards"}}>
-      <span style={{fontSize:12}}>{c.icon}</span>
-      <span style={{fontSize:10,color:c.color,letterSpacing:"0.1em",animation:status==="searching"?"textPulse 1s infinite":"none"}}>{c.text}</span>
+      {isUser&&<div style={{width:34,height:34,borderRadius:"50%",background:"linear-gradient(135deg,#0e3d2e,#1a6b4a)",border:"1px solid rgba(135,206,235,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,marginLeft:10,flexShrink:0,marginTop:2,color:"#87ceeb"}}>◈</div>}
     </div>
   );
 };
@@ -269,7 +512,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [searchStatus, setSearchStatus] = useState(null); // null | "searching" | "done" | "failed"
+  const [searchStatus, setSearchStatus] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState(null);
   const [streamingText, setStreamingText] = useState("");
@@ -277,40 +520,26 @@ export default function App() {
   const textareaRef = useRef(null);
   const activeSessionRef = useRef(null);
 
-  // Keep ref in sync
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
+  useEffect(() => { return onAuthStateChanged(auth, u => { setUser(u); setAuthLoading(false); }); }, []);
 
-  // Auth listener
-  useEffect(() => {
-    return onAuthStateChanged(auth, u => { setUser(u); setAuthLoading(false); });
-  }, []);
-
-  // Sessions listener
   useEffect(() => {
     if (!user) { setSessions([]); return; }
     const q = query(collection(db,"users",user.uid,"sessions"), orderBy("updatedAt","desc"));
-    return onSnapshot(q, snap => {
-      setSessions(snap.docs.map(d=>({id:d.id,...d.data()})));
-    });
+    return onSnapshot(q, snap => { setSessions(snap.docs.map(d=>({id:d.id,...d.data()}))); });
   }, [user]);
 
-  // Messages listener
   useEffect(() => {
     if (!user||!activeSessionId) { setMessages([]); return; }
     const q = query(collection(db,"users",user.uid,"sessions",activeSessionId,"messages"), orderBy("createdAt","asc"));
-    return onSnapshot(q, snap => {
-      setMessages(snap.docs.map(d=>({id:d.id,...d.data()})));
-    });
+    return onSnapshot(q, snap => { setMessages(snap.docs.map(d=>({id:d.id,...d.data()}))); });
   }, [user, activeSessionId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [messages, isLoading, streamingText]);
 
   const handleNewChat = async () => {
     if (!user) return;
-    const ref = await addDoc(collection(db,"users",user.uid,"sessions"),{
-      title:"New Conversation", messageCount:0,
-      createdAt:serverTimestamp(), updatedAt:serverTimestamp(),
-    });
+    const ref = await addDoc(collection(db,"users",user.uid,"sessions"),{ title:"New Conversation",messageCount:0,createdAt:serverTimestamp(),updatedAt:serverTimestamp() });
     setActiveSessionId(ref.id); setMessages([]); setError(null); setStreamingText("");
   };
 
@@ -322,130 +551,73 @@ export default function App() {
     if (activeSessionId===id) { setActiveSessionId(null); setMessages([]); setStreamingText(""); }
   };
 
-  // ── Send message with streaming ───────────────────────────────────────────
   const sendMessage = async () => {
     const trimmed = input.trim();
-    if (!trimmed||isLoading||!user) return;
+    if (!trimmed||isLoading||isStreaming||!user) return;
 
     let sessionId = activeSessionId;
     if (!sessionId) {
-      const ref = await addDoc(collection(db,"users",user.uid,"sessions"),{
-        title:trimmed.slice(0,40), messageCount:0,
-        createdAt:serverTimestamp(), updatedAt:serverTimestamp(),
-      });
-      sessionId = ref.id;
-      setActiveSessionId(sessionId);
+      const ref = await addDoc(collection(db,"users",user.uid,"sessions"),{ title:trimmed.slice(0,40),messageCount:0,createdAt:serverTimestamp(),updatedAt:serverTimestamp() });
+      sessionId = ref.id; setActiveSessionId(sessionId);
     }
 
-    const userMsg = {role:"user",content:trimmed,createdAt:serverTimestamp()};
     setInput(""); setIsLoading(true); setIsStreaming(false);
     setSearchStatus(null); setSearchQuery(""); setError(null); setStreamingText("");
 
-    await addDoc(collection(db,"users",user.uid,"sessions",sessionId,"messages"), userMsg);
-
+    await addDoc(collection(db,"users",user.uid,"sessions",sessionId,"messages"),{ role:"user",content:trimmed,createdAt:serverTimestamp() });
     const history = [...messages,{role:"user",content:trimmed}];
 
     try {
-      const res = await fetch(`${API_URL}/api/chat`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({messages:history.map(m=>({role:m.role,content:m.content}))}),
-      });
-
+      const res = await fetch(`${API_URL}/api/chat`,{ method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:history.map(m=>({role:m.role,content:m.content}))}) });
       if (!res.ok) throw new Error("Server error");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
-      let fullText = "";
-      let streamStarted = false;
-
+      let buffer = ""; let fullText = ""; let streamStarted = false;
       setIsLoading(false);
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
+        buffer += decoder.decode(value,{stream:true});
+        const lines = buffer.split("\n"); buffer = lines.pop();
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-
+          const jsonStr = line.slice(6).trim(); if (!jsonStr) continue;
           try {
-            const event = JSON.parse(jsonStr);
-
-            if (event.type === "searching") {
-              setSearchStatus("searching");
-              setSearchQuery(event.query || "");
+            const ev = JSON.parse(jsonStr);
+            if (ev.type==="searching") { setSearchStatus("searching"); setSearchQuery(ev.query||""); }
+            else if (ev.type==="search_done") { setSearchStatus("done"); setTimeout(()=>setSearchStatus(null),2000); }
+            else if (ev.type==="search_failed") { setSearchStatus("failed"); setTimeout(()=>setSearchStatus(null),3000); }
+            else if (ev.type==="chunk") {
+              if (!streamStarted) { setIsStreaming(true); streamStarted=true; }
+              fullText+=ev.text; setStreamingText(fullText);
             }
-            else if (event.type === "search_done") {
-              setSearchStatus("done");
-              setTimeout(() => setSearchStatus(null), 2000);
-            }
-            else if (event.type === "search_failed") {
-              setSearchStatus("failed");
-              setTimeout(() => setSearchStatus(null), 3000);
-            }
-            else if (event.type === "chunk") {
-              if (!streamStarted) { setIsStreaming(true); streamStarted = true; }
-              fullText += event.text;
-              setStreamingText(fullText);
-            }
-            else if (event.type === "done") {
-              setIsStreaming(false);
-              setStreamingText("");
-              setSearchStatus(null);
-
-              // Save to Firestore
-              const sid = activeSessionRef.current || sessionId;
-              await addDoc(collection(db,"users",user.uid,"sessions",sid,"messages"),{
-                role:"assistant", content:fullText, createdAt:serverTimestamp(),
-              });
+            else if (ev.type==="done") {
+              setIsStreaming(false); setStreamingText(""); setSearchStatus(null);
+              const sid = activeSessionRef.current||sessionId;
+              await addDoc(collection(db,"users",user.uid,"sessions",sid,"messages"),{ role:"assistant",content:fullText,createdAt:serverTimestamp() });
               const sessionRef = doc(db,"users",user.uid,"sessions",sid);
               const snap = await getDoc(sessionRef);
               const count = (snap.data()?.messageCount||0)+2;
-              await updateDoc(sessionRef,{
-                updatedAt:serverTimestamp(), messageCount:count,
-                title: snap.data()?.title==="New Conversation" ? trimmed.slice(0,40) : snap.data()?.title,
-              });
+              await updateDoc(sessionRef,{ updatedAt:serverTimestamp(),messageCount:count,title:snap.data()?.title==="New Conversation"?trimmed.slice(0,40):snap.data()?.title });
             }
-            else if (event.type === "error") {
-              setError(event.message);
-              setIsStreaming(false);
-            }
-          } catch (_) {}
+            else if (ev.type==="error") { setError(ev.message); setIsStreaming(false); }
+          } catch(_) {}
         }
       }
-
-    } catch(err) {
-      setError(err.message);
-      setIsLoading(false);
-      setIsStreaming(false);
-    }
+    } catch(err) { setError(err.message); setIsLoading(false); setIsStreaming(false); }
   };
 
   const handleKeyDown = e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} };
-
   const latestAsstIdx = messages.reduce((acc,m,i)=>m.role==="assistant"?i:acc,-1);
   const suggestions = ["What are the latest AI trends in 2026?","Plan a product roadmap","Create a flowchart for user login"];
 
-  if (authLoading) return (
-    <div style={{minHeight:"100vh",background:"#050e09",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:"#2d9e6b",fontFamily:"'DM Mono',monospace",fontSize:12,letterSpacing:"0.2em",animation:"pulse 1.5s infinite"}}>LOADING HLAED...</div>
-    </div>
-  );
-
+  if (authLoading) return <div style={{minHeight:"100vh",background:"#050e09",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"#2d9e6b",fontFamily:"'DM Mono',monospace",fontSize:12,letterSpacing:"0.2em",animation:"pulse 1.5s infinite"}}>LOADING HLAED...</div></div>;
   if (!user) return <LoginPage/>;
 
-  // Build display messages — append streaming message if active
-  const displayMessages = isStreaming && streamingText
-    ? [...messages, { id:"streaming", role:"assistant", content:streamingText }]
-    : messages;
-
+  const displayMessages = isStreaming&&streamingText ? [...messages,{id:"streaming",role:"assistant",content:streamingText}] : messages;
   const displayLatestIdx = displayMessages.reduce((acc,m,i)=>m.role==="assistant"?i:acc,-1);
 
   return (
@@ -466,10 +638,10 @@ export default function App() {
         @keyframes lid-R{0%,38%,54%,100%{ry:0}44%,48%{ry:9}}
         @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
         textarea:focus{outline:none} button{transition:all .2s} button:hover{opacity:.85} button:active{transform:scale(.97)}
+        table{border-collapse:collapse;width:100%}
       `}</style>
 
-      <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId}
-        onNewChat={handleNewChat} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession}/>
+      <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId} onNewChat={handleNewChat} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession}/>
 
       <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"}}>
         <div style={{position:"absolute",inset:0,pointerEvents:"none",backgroundImage:`linear-gradient(rgba(135,206,235,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(135,206,235,.03) 1px,transparent 1px)`,backgroundSize:"40px 40px",animation:"floatGrid 8s ease-in-out infinite"}}/>
@@ -509,16 +681,8 @@ export default function App() {
             </div>
           )}
 
-          {displayMessages.map((msg,i)=>(
-            <MessageBlock
-              key={msg.id||i}
-              msg={msg}
-              isLatest={i===displayLatestIdx}
-              isStreaming={isStreaming && msg.id==="streaming"}
-            />
-          ))}
+          {displayMessages.map((msg,i)=>(<MessageBlock key={msg.id||i} msg={msg} isLatest={i===displayLatestIdx} isStreaming={isStreaming&&msg.id==="streaming"}/>))}
 
-          {/* Search + thinking indicators */}
           {(isLoading||searchStatus)&&(
             <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20}}>
               <SearchIndicator status={searchStatus} query={searchQuery}/>
@@ -533,15 +697,13 @@ export default function App() {
         {/* Input */}
         <div style={{padding:"16px 24px",borderTop:"1px solid rgba(135,206,235,.08)",background:"rgba(5,14,9,.9)",backdropFilter:"blur(16px)",position:"relative",zIndex:10}}>
           <div style={{display:"flex",gap:12,alignItems:"flex-end",background:"rgba(135,206,235,.04)",border:"1px solid rgba(135,206,235,.15)",borderRadius:16,padding:"10px 14px"}}>
-            <textarea ref={textareaRef} value={input}
-              onChange={e=>setInput(e.target.value)} onKeyDown={handleKeyDown}
+            <textarea ref={textareaRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKeyDown}
               placeholder="Ask Hlaed anything — research, planning, flowcharts..."
               rows={1} style={{flex:1,background:"transparent",border:"none",color:"#d8eff8",fontSize:14,resize:"none",fontFamily:"'DM Mono',monospace",lineHeight:1.6,maxHeight:140,overflowY:"auto",caretColor:"#87ceeb"}}
               onInput={e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,140)+"px";}}/>
             <button onClick={sendMessage} disabled={!input.trim()||isLoading||isStreaming} style={{background:input.trim()&&!isLoading&&!isStreaming?"linear-gradient(135deg,#0e5c3a,#1a8a5a)":"rgba(255,255,255,.04)",border:`1px solid ${input.trim()&&!isLoading&&!isStreaming?"rgba(135,206,235,.3)":"rgba(255,255,255,.06)"}`,borderRadius:12,color:input.trim()&&!isLoading&&!isStreaming?"#87ceeb":"#2a4a35",width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",cursor:input.trim()&&!isLoading&&!isStreaming?"pointer":"not-allowed",fontSize:18,flexShrink:0,boxShadow:input.trim()&&!isLoading&&!isStreaming?"0 4px 16px rgba(135,206,235,.2)":"none"}}>↑</button>
           </div>
-          <div style={{fontSize:10,color:"#1a4a2a",marginTop:8,textAlign:"center",letterSpacing:"0.1em"}}>
-            SHIFT+ENTER NEW LINE · ENTER SEND · HLAED v3.0 · BY HLAED COMPANY</div>
+          <div style={{fontSize:10,color:"#1a4a2a",marginTop:8,textAlign:"center",letterSpacing:"0.1em"}}>SHIFT+ENTER NEW LINE · ENTER SEND · HLAED v3.0 · BY HLAED COMPANY</div>
         </div>
       </div>
     </div>
