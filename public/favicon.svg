@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0e3d2e"/>
+      <stop offset="100%" stop-color="#071a12"/>
+    </radialGradient>
+    <radialGradient id="iris" cx="40%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#b8e8ff"/>
+      <stop offset="40%" stop-color="#87ceeb"/>
+      <stop offset="100%" stop-color="#1a6b4a"/>
+    </radialGradient>
+    <radialGradient id="pupil" cx="35%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#1a3a2a"/>
+      <stop offset="100%" stop-color="#050f09"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="cb"/>
+      <feMerge><feMergeNode in="cb"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Hexagon background -->
+  <polygon points="32,3 58,18 58,46 32,61 6,46 6,18"
+    fill="url(#bg)" stroke="#87ceeb" stroke-width="1.5" stroke-opacity="0.8"/>
+  <!-- Sclera -->
+  <ellipse cx="32" cy="32" rx="16" ry="10"
+    fill="#0a2a1e" stroke="#2d9e6b" stroke-width="0.8" stroke-opacity="0.5"/>
+  <!-- Iris -->
+  <circle cx="32" cy="32" r="7.5" fill="url(#iris)" filter="url(#glow)"/>
+  <!-- Pupil -->
+  <circle cx="32" cy="32" r="3.8" fill="url(#pupil)"/>
+  <!-- Shine -->
+  <circle cx="30.2" cy="30.2" r="1.2" fill="#ffffff" fill-opacity="0.8"/>
+  <!-- Top eyelid -->
+  <path d="M16,32 Q32,18 48,32" fill="none" stroke="#87ceeb"
+    stroke-width="2" stroke-linecap="round" filter="url(#glow)" stroke-opacity="0.95"/>
+  <!-- Bottom eyelid -->
+  <path d="M16,32 Q32,43 48,32" fill="none" stroke="#2d9e6b"
+    stroke-width="1.2" stroke-linecap="round" stroke-opacity="0.7"/>
+  <!-- Corner dots -->
+  <circle cx="32" cy="3" r="1.5" fill="#87ceeb" fill-opacity="0.6"/>
+  <circle cx="58" cy="18" r="1.5" fill="#87ceeb" fill-opacity="0.6"/>
+  <circle cx="58" cy="46" r="1.5" fill="#87ceeb" fill-opacity="0.6"/>
+  <circle cx="32" cy="61" r="1.5" fill="#87ceeb" fill-opacity="0.6"/>
+  <circle cx="6" cy="46" r="1.5" fill="#87ceeb" fill-opacity="0.6"/>
+  <circle cx="6" cy="18" r="1.5" fill="#87ceeb" fill-opacity="0.6"/>
+</svg>

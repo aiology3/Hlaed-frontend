@@ -607,6 +607,24 @@ export default function App() {
     if (activeSessionId===id) { setActiveSessionId(null); setMessages([]); setStreamingText(""); }
   };
 
+  const handleRenameSession = async (id, newTitle) => {
+    if (!user) return;
+    await updateDoc(doc(db,"users",user.uid,"sessions",id), { title: newTitle });
+  };
+
+  const handleMoveToProject = async (sessionId, projectId) => {
+    if (!user) return;
+    if (!projectId) {
+      await updateDoc(doc(db,"users",user.uid,"sessions",sessionId), { projectId:null, projectName:null });
+      return;
+    }
+    // Get project name
+    const { getDoc } = await import("firebase/firestore");
+    const projectSnap = await getDoc(doc(db,"users",user.uid,"projects",projectId));
+    const projectName = projectSnap.data()?.name || "";
+    await updateDoc(doc(db,"users",user.uid,"sessions",sessionId), { projectId, projectName });
+  };
+
   const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed||isLoading||isStreaming||!user) return;
@@ -697,7 +715,7 @@ export default function App() {
         table{border-collapse:collapse;width:100%}
       `}</style>
 
-      <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId} onNewChat={handleNewChat} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession}/>
+      <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId} onNewChat={handleNewChat} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} onRenameSession={handleRenameSession} onMoveToProject={handleMoveToProject}/>
 
       <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"}}>
         <div style={{position:"absolute",inset:0,pointerEvents:"none",backgroundImage:`linear-gradient(rgba(135,206,235,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(135,206,235,.03) 1px,transparent 1px)`,backgroundSize:"40px 40px",animation:"floatGrid 8s ease-in-out infinite"}}/>
