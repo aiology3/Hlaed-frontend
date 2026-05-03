@@ -49,35 +49,48 @@ const MermaidChart = ({ code }) => {
     });
   }, [code]);
 
-  // ── Download as PNG (works in Word, PowerPoint, WhatsApp everywhere) ──────
+  // ── Download as PNG ───────────────────────────────────────────────────────
   const downloadPNG = () => {
     if (!svgRef.current) return;
     const svgEl = svgRef.current.querySelector("svg");
     if (!svgEl) return;
 
-    const scale = 3; // high resolution
-    const rect = svgEl.getBoundingClientRect();
-    const width = rect.width || 900;
-    const height = rect.height || 500;
+    // Clone SVG and inline all computed styles for accurate rendering
+    const cloned = svgEl.cloneNode(true);
+    const allEls = cloned.querySelectorAll("*");
+    const origEls = svgEl.querySelectorAll("*");
+    origEls.forEach((el, i) => {
+      const styles = window.getComputedStyle(el);
+      const fill = styles.fill; const stroke = styles.stroke;
+      if (fill && fill !== "none") allEls[i].setAttribute("fill", fill);
+      if (stroke && stroke !== "none") allEls[i].setAttribute("stroke", stroke);
+    });
 
+    // Set explicit white background
+    cloned.setAttribute("style", "background:#ffffff;");
+    const bgRect = document.createElementNS("http://www.w3.org/2000/svg","rect");
+    bgRect.setAttribute("width","100%"); bgRect.setAttribute("height","100%");
+    bgRect.setAttribute("fill","#ffffff");
+    cloned.insertBefore(bgRect, cloned.firstChild);
+
+    const scale = 3;
+    const width = svgEl.viewBox?.baseVal?.width || svgEl.getBoundingClientRect().width || 900;
+    const height = svgEl.viewBox?.baseVal?.height || svgEl.getBoundingClientRect().height || 500;
+    cloned.setAttribute("width", width);
+    cloned.setAttribute("height", height);
+
+    const svgData = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(cloned));
     const canvas = document.createElement("canvas");
     canvas.width = width * scale;
     canvas.height = height * scale;
     const ctx = canvas.getContext("2d");
-
-    // White background — works on Word, PowerPoint, etc.
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.scale(scale, scale);
 
-    const svgData = new XMLSerializer().serializeToString(svgEl);
-    const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
     const img = new Image();
-
     img.onload = () => {
       ctx.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(url);
       const a = document.createElement("a");
       a.href = canvas.toDataURL("image/png", 1.0);
       a.download = "hlaed-flowchart.png";
@@ -85,7 +98,11 @@ const MermaidChart = ({ code }) => {
       setDlState("png");
       setTimeout(() => setDlState(null), 2500);
     };
-    img.src = url;
+    img.onerror = () => {
+      // Ultimate fallback: download SVG instead
+      downloadSVG();
+    };
+    img.src = svgData;
   };
 
   // ── Download as SVG (vector — perfect quality at any size) ───────────────
@@ -456,10 +473,28 @@ const StreamCursor = () => (
 );
 
 // ─── Copy answer button ────────────────────────────────────────────────────────
+const stripMarkdown = (text) => {
+  return text
+    .replace(/```mermaid[\s\S]*?```/g, "[Flowchart diagram]")
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g,"").replace(/```/g,"").trim())
+    .replace(/#{1,6}\s+/g, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^\s*>\s+/gm, "")
+    .replace(/---+/g, "─────────────")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+};
+
 const CopyButton = ({ text }) => {
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
-    navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(()=>setCopied(false),2000); });
+    const clean = stripMarkdown(text);
+    navigator.clipboard.writeText(clean).then(() => { setCopied(true); setTimeout(()=>setCopied(false),2000); });
   };
   return (
     <button onClick={handleCopy} style={{display:"flex",alignItems:"center",gap:4,background:"transparent",border:"1px solid rgba(135,206,235,0.12)",borderRadius:6,color:copied?"#2d9e6b":"#4a7a5a",padding:"3px 8px",fontSize:9,cursor:"pointer",fontFamily:"'DM Mono',monospace",letterSpacing:"0.08em",transition:"all .2s",marginTop:6,alignSelf:"flex-start"}}>
