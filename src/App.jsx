@@ -36,7 +36,7 @@ const loadMermaid = () => new Promise((resolve) => {
 const MermaidChart = ({ code }) => {
   const [svg, setSvg] = useState("");
   const [err, setErr] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [dlState, setDlState] = useState(null); // null | "png" | "svg"
   const svgRef = useRef(null);
 
   useEffect(() => {
@@ -49,76 +49,97 @@ const MermaidChart = ({ code }) => {
     });
   }, [code]);
 
-  // Copy flowchart as PNG image to clipboard
-  const handleCopyFlowchart = async () => {
+  // ── Download as PNG (works in Word, PowerPoint, WhatsApp everywhere) ──────
+  const downloadPNG = () => {
     if (!svgRef.current) return;
-    try {
-      const svgEl = svgRef.current.querySelector("svg");
-      if (!svgEl) return;
+    const svgEl = svgRef.current.querySelector("svg");
+    if (!svgEl) return;
 
-      const svgData = new XMLSerializer().serializeToString(svgEl);
-      const canvas = document.createElement("canvas");
-      const scale = 2; // retina quality
-      const width = svgEl.getBoundingClientRect().width || 800;
-      const height = svgEl.getBoundingClientRect().height || 400;
-      canvas.width = width * scale;
-      canvas.height = height * scale;
+    const scale = 3; // high resolution
+    const rect = svgEl.getBoundingClientRect();
+    const width = rect.width || 900;
+    const height = rect.height || 500;
 
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#050e09"; // Hlaed dark background
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(scale, scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
 
-      const img = new Image();
-      const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
+    // White background — works on Word, PowerPoint, etc.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(scale, scale);
 
-      img.onload = async () => {
-        ctx.drawImage(img, 0, 0, width, height);
-        URL.revokeObjectURL(url);
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
 
-        canvas.toBlob(async (pngBlob) => {
-          try {
-            await navigator.clipboard.write([
-              new ClipboardItem({ "image/png": pngBlob }),
-            ]);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2500);
-          } catch {
-            // Fallback: download as PNG
-            const a = document.createElement("a");
-            a.href = canvas.toDataURL("image/png");
-            a.download = "hlaed-flowchart.png";
-            a.click();
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2500);
-          }
-        }, "image/png");
-      };
-      img.src = url;
-    } catch (e) {
-      console.error("Copy failed:", e);
-    }
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png", 1.0);
+      a.download = "hlaed-flowchart.png";
+      a.click();
+      setDlState("png");
+      setTimeout(() => setDlState(null), 2500);
+    };
+    img.src = url;
+  };
+
+  // ── Download as SVG (vector — perfect quality at any size) ───────────────
+  const downloadSVG = () => {
+    if (!svgRef.current) return;
+    const svgEl = svgRef.current.querySelector("svg");
+    if (!svgEl) return;
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "hlaed-flowchart.svg";
+    a.click();
+    URL.revokeObjectURL(url);
+    setDlState("svg");
+    setTimeout(() => setDlState(null), 2500);
   };
 
   if (err) return <div style={{color:"#e88",fontSize:12,padding:"8px 12px",background:"rgba(200,80,80,.08)",borderRadius:8,marginTop:8}}>{err}</div>;
   if (!svg) return <div style={{color:"#4a9a6a",fontSize:11,padding:"8px",letterSpacing:"0.1em"}}>RENDERING FLOWCHART...</div>;
 
+  const btnBase = {
+    display:"flex", alignItems:"center", gap:5,
+    borderRadius:8, padding:"5px 12px", fontSize:10, cursor:"pointer",
+    fontFamily:"'DM Mono',monospace", letterSpacing:"0.07em", transition:"all .2s",
+  };
+
   return (
     <div style={{marginTop:12,padding:16,background:"rgba(135,206,235,0.04)",border:"1px solid rgba(135,206,235,0.15)",borderRadius:12,overflowX:"auto",boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:10,color:"#2d9e6b",letterSpacing:"0.15em"}}>◈ FLOWCHART</div>
-        <button onClick={handleCopyFlowchart} style={{
-          display:"flex",alignItems:"center",gap:6,
-          background: copied ? "rgba(45,158,107,0.2)" : "rgba(135,206,235,0.08)",
-          border: `1px solid ${copied ? "rgba(45,158,107,0.4)" : "rgba(135,206,235,0.2)"}`,
-          borderRadius:8, color: copied ? "#2d9e6b" : "#87ceeb",
-          padding:"5px 12px", fontSize:10, cursor:"pointer",
-          fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em", transition:"all .2s",
-        }}>
-          <span>{copied ? "✓" : "⎘"}</span>
-          {copied ? "COPIED AS IMAGE!" : "COPY FLOWCHART"}
-        </button>
+        <div style={{display:"flex",gap:8}}>
+          {/* Download PNG — use in Word, PowerPoint, WhatsApp */}
+          <button onClick={downloadPNG} style={{
+            ...btnBase,
+            background: dlState==="png" ? "rgba(45,158,107,0.2)" : "rgba(135,206,235,0.08)",
+            border: `1px solid ${dlState==="png" ? "rgba(45,158,107,0.4)" : "rgba(135,206,235,0.2)"}`,
+            color: dlState==="png" ? "#2d9e6b" : "#87ceeb",
+          }}>
+            <span>{dlState==="png" ? "✓" : "↓"}</span>
+            {dlState==="png" ? "DOWNLOADED!" : "DOWNLOAD PNG"}
+          </button>
+          {/* Download SVG — vector, perfect quality */}
+          <button onClick={downloadSVG} style={{
+            ...btnBase,
+            background: dlState==="svg" ? "rgba(45,158,107,0.2)" : "rgba(135,206,235,0.05)",
+            border: `1px solid ${dlState==="svg" ? "rgba(45,158,107,0.4)" : "rgba(135,206,235,0.15)"}`,
+            color: dlState==="svg" ? "#2d9e6b" : "#4a9a6a",
+          }}>
+            <span>{dlState==="svg" ? "✓" : "↓"}</span>
+            {dlState==="svg" ? "DOWNLOADED!" : "DOWNLOAD SVG"}
+          </button>
+        </div>
       </div>
       <div ref={svgRef} dangerouslySetInnerHTML={{__html:svg}} style={{display:"flex",justifyContent:"center"}}/>
     </div>
