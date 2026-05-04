@@ -383,7 +383,8 @@ const cleanInlineJSX = (text) => {
 };
 
 // ─── Parse content into mermaid + text blocks ──────────────────────────────────
-const parseContent = (content) => {
+const parseContent = (rawContent) => {
+  const content = (rawContent || "").replace(/\[GENERATE_IMAGE:[^\]]*\]/gi, "").trim();
   const parts=[]; const regex=/```mermaid\n([\s\S]*?)```/g; let last=0, m;
   while((m=regex.exec(content))!==null){
     if(m.index>last) parts.push({type:"text",content:content.slice(last,m.index)});
@@ -472,9 +473,83 @@ const StreamCursor = () => (
   <span style={{display:"inline-block",width:2,height:"1em",background:"#87ceeb",marginLeft:2,verticalAlign:"middle",animation:"cursorBlink 0.7s steps(1) infinite"}}/>
 );
 
+// ─── Generated image component ─────────────────────────────────────────────────
+const GeneratedImage = ({ imageUrl, prompt }) => {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(imageUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `hlaed-image-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(imageUrl, "_blank");
+    }
+    setDownloading(false);
+  };
+
+  if (error) return (
+    <div style={{padding:"12px 16px",background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.2)",borderRadius:12,color:"#e88",fontSize:12,marginTop:8}}>
+      ⚠ Image could not be loaded. Please try again.
+    </div>
+  );
+
+  return (
+    <div style={{marginTop:12,borderRadius:14,overflow:"hidden",border:"1px solid rgba(135,206,235,0.15)",boxShadow:"0 8px 30px rgba(0,0,0,0.4)",maxWidth:480}}>
+      {/* Loading shimmer */}
+      {!loaded && !error && (
+        <div style={{width:"100%",height:300,background:"linear-gradient(90deg,#0a1f15 25%,#0e2d1e 50%,#0a1f15 75%)",backgroundSize:"200% 100%",animation:"shimmer 1.5s infinite",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:28,animation:"pulse 1s infinite"}}>🎨</div>
+          <div style={{fontSize:10,color:"#4a9a6a",letterSpacing:"0.15em",animation:"textPulse 1s infinite"}}>GENERATING IMAGE...</div>
+        </div>
+      )}
+      {/* Image */}
+      <img
+        src={imageUrl}
+        alt={prompt}
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
+        style={{
+          width:"100%", display: loaded ? "block" : "none",
+          borderRadius:"14px 14px 0 0",
+        }}
+      />
+      {/* Footer with download */}
+      {loaded && (
+        <div style={{background:"rgba(5,14,9,0.95)",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+          <div style={{fontSize:10,color:"#4a7a5a",letterSpacing:"0.05em",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            ◈ {prompt.slice(0,60)}{prompt.length>60?"...":""}
+          </div>
+          <button onClick={handleDownload} disabled={downloading} style={{
+            display:"flex",alignItems:"center",gap:6,
+            background:"linear-gradient(135deg,#0e5c3a,#1a8a5a)",
+            border:"1px solid rgba(135,206,235,0.3)",
+            borderRadius:8, color:"#87ceeb",
+            padding:"5px 14px", fontSize:10, cursor:"pointer",
+            fontFamily:"'DM Mono',monospace", letterSpacing:"0.08em",
+            flexShrink:0, transition:"all .2s",
+            boxShadow:"0 2px 8px rgba(135,206,235,0.15)",
+          }}>
+            {downloading ? "..." : "↓"} {downloading ? "DOWNLOADING" : "DOWNLOAD"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Copy answer button ────────────────────────────────────────────────────────
 const stripMarkdown = (text) => {
   return text
+    .replace(/\[GENERATE_IMAGE:[^\]]*\]/gi, "")
     .replace(/```mermaid[\s\S]*?```/g, "[Flowchart diagram]")
     .replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g,"").replace(/```/g,"").trim())
     .replace(/#{1,6}\s+/g, "")
@@ -549,6 +624,17 @@ const MessageBlock = ({ msg, isLatest, isStreaming }) => {
                 </div>
               )
             )}
+            {/* Show generating indicator */}
+            {msg.generatingImage && (
+              <div style={{marginTop:10,padding:"12px 16px",background:"rgba(135,206,235,0.04)",border:"1px solid rgba(135,206,235,0.12)",borderRadius:12,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18,animation:"pulse 1s infinite"}}>🎨</span>
+                <span style={{fontSize:10,color:"#4a9a6a",letterSpacing:"0.15em",animation:"textPulse 1s infinite"}}>CREATING YOUR IMAGE...</span>
+              </div>
+            )}
+            {/* Show generated image */}
+            {msg.imageUrl && (
+              <GeneratedImage imageUrl={msg.imageUrl} prompt={msg.imagePrompt||"Generated image"}/>
+            )}
           </div>
         )}
       </div>
@@ -572,6 +658,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState(null);
   const [streamingText, setStreamingText] = useState("");
+  const [pendingImagePrompt, setPendingImagePrompt] = useState(null);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
   const activeSessionRef = useRef(null);
@@ -649,6 +736,8 @@ export default function App() {
       const decoder = new TextDecoder();
       let buffer = ""; let fullText = ""; let streamStarted = false;
       setIsLoading(false);
+      let pendingImageUrl = null;
+      let pendingImagePrompt = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -668,14 +757,28 @@ export default function App() {
               if (!streamStarted) { setIsStreaming(true); streamStarted=true; }
               fullText+=ev.text; setStreamingText(fullText);
             }
+            else if (ev.type==="generate_image") {
+              // Image generation — Pollinations AI URL built from prompt
+              const imagePrompt = ev.prompt;
+              const seed = Math.floor(Math.random() * 999999);
+              const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&enhance=true`;
+              pendingImageUrl = imageUrl;
+              pendingImagePrompt = imagePrompt;
+            }
             else if (ev.type==="done") {
               setIsStreaming(false); setStreamingText(""); setSearchStatus(null);
               const sid = activeSessionRef.current||sessionId;
-              await addDoc(collection(db,"users",user.uid,"sessions",sid,"messages"),{ role:"assistant",content:fullText,createdAt:serverTimestamp() });
+              // Save message — include image if generated
+              const msgData = {
+                role:"assistant", content:fullText, createdAt:serverTimestamp(),
+                ...(pendingImageUrl ? { imageUrl:pendingImageUrl, imagePrompt:pendingImagePrompt } : {}),
+              };
+              await addDoc(collection(db,"users",user.uid,"sessions",sid,"messages"), msgData);
               const sessionRef = doc(db,"users",user.uid,"sessions",sid);
               const snap = await getDoc(sessionRef);
               const count = (snap.data()?.messageCount||0)+2;
               await updateDoc(sessionRef,{ updatedAt:serverTimestamp(),messageCount:count,title:snap.data()?.title==="New Conversation"?trimmed.slice(0,40):snap.data()?.title });
+              pendingImageUrl = null; pendingImagePrompt = null;
             }
             else if (ev.type==="error") { setError(ev.message); setIsStreaming(false); }
           } catch(_) {}
@@ -686,7 +789,7 @@ export default function App() {
 
   const handleKeyDown = e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} };
   const latestAsstIdx = messages.reduce((acc,m,i)=>m.role==="assistant"?i:acc,-1);
-  const suggestions = ["What are the latest AI trends in 2026?","Plan a product roadmap","Create a flowchart for user login"];
+  const suggestions = ["What are the latest AI trends in 2026?","Generate an image of a futuristic Indian city","Create a flowchart for user login"];
 
   if (authLoading) return <div style={{minHeight:"100vh",background:"#050e09",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"#2d9e6b",fontFamily:"'DM Mono',monospace",fontSize:12,letterSpacing:"0.2em",animation:"pulse 1.5s infinite"}}>LOADING HLAED...</div></div>;
   if (!user) return <LoginPage/>;
@@ -710,7 +813,7 @@ export default function App() {
         @keyframes lid-L{0%,35%,50%,100%{ry:0}41%,45%{ry:9}}
         @keyframes blink-R{0%,38%,54%,100%{transform:scaleY(1)}44%,48%{transform:scaleY(0.06)}}
         @keyframes lid-R{0%,38%,54%,100%{ry:0}44%,48%{ry:9}}
-        @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
+        @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}} @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
         textarea:focus{outline:none} button{transition:all .2s} button:hover{opacity:.85} button:active{transform:scale(.97)}
         table{border-collapse:collapse;width:100%}
       `}</style>
