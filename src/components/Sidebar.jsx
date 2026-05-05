@@ -11,10 +11,13 @@ const BlinkingEyeBtn = ({ active, onClick, blinking }) => (
   <svg
     width="18" height="18" viewBox="0 0 32 32" fill="none"
     onClick={onClick}
+    className="sb-eye-btn"
+    title="Click to open options"
     style={{
       cursor:"pointer", flexShrink:0,
-      filter: active ? "drop-shadow(0 0 4px rgba(135,206,235,0.6))" : "none",
-      transition:"filter .2s",
+      filter: active ? "drop-shadow(0 0 6px rgba(135,206,235,0.8))" : "drop-shadow(0 0 0px rgba(135,206,235,0))",
+      transition:"filter .2s, transform .15s",
+      transform: active ? "scale(1.2)" : "scale(1)",
     }}
   >
     <style>{`
@@ -194,7 +197,7 @@ const SessionItem = ({ s, isActive, onSelect, onRename, onDelete, onMoveToProjec
                 {projects.map(p => (
                   <button key={p.id} onClick={() => handleMoveToProject(p.id)}
                     style={{...menuBtnStyle, color:"#87ceeb"}}>
-                    📁 {p.name}
+                    ◫ {p.name}
                   </button>
                 ))}
               </div>
@@ -255,7 +258,7 @@ const ProjectSection = ({ project, sessions, activeSessionId, onSelect, onRename
               onClick={e=>e.stopPropagation()}
               style={{background:"rgba(0,0,0,0.4)",border:"1px solid rgba(135,206,235,0.3)",borderRadius:4,color:"#87ceeb",fontSize:10,padding:"1px 5px",fontFamily:"'DM Mono',monospace",width:"80%"}}
             />
-          ) : `📁 ${project.name.toUpperCase()}`}
+          ) : `◫ ${project.name.toUpperCase()}`}
         </span>
         <span style={{fontSize:9,color:"#2a4535"}}>{projectSessions.length}</span>
         {/* Project options */}
@@ -342,6 +345,8 @@ export default function Sidebar({ user, sessions, activeSessionId, onNewChat, on
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@800&display=swap');
         .sb-item:hover{background:rgba(135,206,235,0.06)!important;}
         .sb-new:hover{background:rgba(135,206,235,0.1)!important;border-color:rgba(135,206,235,0.35)!important;}
+        .sb-item:hover svg[title]{filter:drop-shadow(0 0 6px rgba(135,206,235,0.8))!important;transform:scale(1.15)!important;}
+        .sb-eye-btn:hover{filter:drop-shadow(0 0 8px rgba(135,206,235,0.9))!important;transform:scale(1.25)!important;}
         ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#1a3a2a;border-radius:3px}
         @keyframes fadeSlideIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
         button:hover{opacity:0.85;}
@@ -373,7 +378,7 @@ export default function Sidebar({ user, sessions, activeSessionId, onNewChat, on
           </div>
         ) : (
           <button onClick={()=>setShowNewProject(true)} style={{width:"100%",padding:"7px 12px",background:"transparent",border:"1px solid rgba(135,206,235,0.1)",borderRadius:9,color:"#4a8a6a",fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",gap:8,fontFamily:"'DM Mono',monospace",letterSpacing:"0.07em",transition:"all .2s"}}>
-            <span style={{fontSize:14,lineHeight:1}}>📁</span> NEW PROJECT
+            <span style={{fontSize:14,lineHeight:1}}>◫</span> NEW PROJECT
           </button>
         )}
       </div>

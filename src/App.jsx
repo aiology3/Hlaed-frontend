@@ -844,6 +844,25 @@ export default function App() {
           table{font-size:10px;}
           th,td{padding:6px 8px!important;}
         }
+        button[title]:hover::after{
+          content:attr(title);
+          position:absolute;
+          bottom:-30px;
+          left:50%;
+          transform:translateX(-50%);
+          background:rgba(10,30,20,0.95);
+          color:#87ceeb;
+          font-size:10px;
+          padding:4px 10px;
+          border-radius:6px;
+          white-space:nowrap;
+          border:1px solid rgba(135,206,235,0.2);
+          pointer-events:none;
+          z-index:999;
+          font-family:'DM Mono',monospace;
+          letter-spacing:0.05em;
+        }
+        button[title]{position:relative;}
       `}</style>
 
       {/* Sidebar overlay for mobile */}
@@ -860,6 +879,9 @@ export default function App() {
         transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
         flexShrink: 0,
         height: isMobile ? "100vh" : "auto",
+        // On desktop: when closed, takes zero width so content expands
+        width: (!isMobile && !sidebarOpen) ? 0 : "auto",
+        overflow: (!isMobile && !sidebarOpen) ? "hidden" : "visible",
       }}>
         <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId}
           onNewChat={()=>{ handleNewChat(); if(isMobile) setSidebarOpen(false); }}
@@ -877,16 +899,20 @@ export default function App() {
         {/* Header */}
         <div style={{padding:"12px 16px",borderBottom:"1px solid rgba(135,206,235,.1)",display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(5,14,9,.85)",backdropFilter:"blur(16px)",position:"relative",zIndex:10,gap:12}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            {/* Sidebar toggle button */}
-            <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{
-              background:"rgba(135,206,235,0.06)",
-              border:"1px solid rgba(135,206,235,0.15)",
-              borderRadius:8, color:"#87ceeb",
-              width:36, height:36, display:"flex",
-              alignItems:"center", justifyContent:"center",
-              cursor:"pointer", fontSize:16, flexShrink:0,
-              transition:"all .2s",
-            }}>
+            {/* Sidebar toggle button with tooltip */}
+            <button
+              onClick={()=>setSidebarOpen(!sidebarOpen)}
+              title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+              style={{
+                background:"rgba(135,206,235,0.06)",
+                border:"1px solid rgba(135,206,235,0.15)",
+                borderRadius:8, color:"#87ceeb",
+                width:36, height:36, display:"flex",
+                alignItems:"center", justifyContent:"center",
+                cursor:"pointer", fontSize:15, flexShrink:0,
+                transition:"all .2s", position:"relative",
+              }}
+            >
               {sidebarOpen ? "◀" : "▶"}
             </button>
             <div style={{filter:"drop-shadow(0 0 12px rgba(135,206,235,.4))",display:"flex"}}><HlaedLogo size={isMobile?32:42}/></div>
