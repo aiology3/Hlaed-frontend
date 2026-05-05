@@ -658,6 +658,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState(null);
   const [streamingText, setStreamingText] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
   const [pendingImagePrompt, setPendingImagePrompt] = useState(null);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -665,6 +667,31 @@ export default function App() {
 
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
   useEffect(() => { return onAuthStateChanged(auth, u => { setUser(u); setAuthLoading(false); }); }, []);
+
+  // Mobile detection & auto-close sidebar on mobile
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) setSidebarOpen(false);
+      else setSidebarOpen(true);
+    };
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Single tab enforcement — broadcast channel
+  useEffect(() => {
+    const bc = new BroadcastChannel("hlaed_tab");
+    bc.postMessage("new_tab");
+    bc.onmessage = (e) => {
+      if (e.data === "new_tab") {
+        document.title = "Hlaed — Session Active Elsewhere";
+      }
+    };
+    return () => bc.close();
+  }, []);
 
   useEffect(() => {
     if (!user) { setSessions([]); return; }
@@ -786,7 +813,7 @@ export default function App() {
 
   const handleKeyDown = e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} };
   const latestAsstIdx = messages.reduce((acc,m,i)=>m.role==="assistant"?i:acc,-1);
-  const suggestions = ["What are the latest AI trends in 2026?","Generate an image of a futuristic Indian city","Create a flowchart for user login"];
+
 
   if (authLoading) return <div style={{minHeight:"100vh",background:"#050e09",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"#2d9e6b",fontFamily:"'DM Mono',monospace",fontSize:12,letterSpacing:"0.2em",animation:"pulse 1.5s infinite"}}>LOADING HLAED...</div></div>;
   if (!user) return <LoginPage/>;
@@ -812,35 +839,72 @@ export default function App() {
         @keyframes lid-R{0%,38%,54%,100%{ry:0}44%,48%{ry:9}}
         @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}} @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
         textarea:focus{outline:none} button{transition:all .2s} button:hover{opacity:.85} button:active{transform:scale(.97)}
-        table{border-collapse:collapse;width:100%}
+        table{border-collapse:collapse;width:100%;font-size:12px;}
+        @media(max-width:768px){
+          table{font-size:10px;}
+          th,td{padding:6px 8px!important;}
+        }
       `}</style>
 
-      <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId} onNewChat={handleNewChat} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} onRenameSession={handleRenameSession} onMoveToProject={handleMoveToProject}/>
+      {/* Sidebar overlay for mobile */}
+      {isMobile && sidebarOpen && (
+        <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:40,backdropFilter:"blur(2px)"}}/>
+      )}
 
-      <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"}}>
+      {/* Sliding Sidebar */}
+      <div style={{
+        position: isMobile ? "fixed" : "relative",
+        left: 0, top: 0, bottom: 0,
+        zIndex: isMobile ? 50 : "auto",
+        transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+        flexShrink: 0,
+        height: isMobile ? "100vh" : "auto",
+      }}>
+        <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId}
+          onNewChat={()=>{ handleNewChat(); if(isMobile) setSidebarOpen(false); }}
+          onSelectSession={(id)=>{ handleSelectSession(id); if(isMobile) setSidebarOpen(false); }}
+          onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
+          onMoveToProject={handleMoveToProject}/>
+      </div>
+
+      <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative",overflow:"hidden",minWidth:0}}>
         <div style={{position:"absolute",inset:0,pointerEvents:"none",backgroundImage:`linear-gradient(rgba(135,206,235,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(135,206,235,.03) 1px,transparent 1px)`,backgroundSize:"40px 40px",animation:"floatGrid 8s ease-in-out infinite"}}/>
         <div style={{position:"absolute",top:"-15%",right:"-10%",width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(14,92,58,.15) 0%,transparent 70%)",pointerEvents:"none"}}/>
         <div style={{position:"absolute",left:0,right:0,height:"2px",background:"linear-gradient(90deg,transparent,rgba(135,206,235,.08),transparent)",animation:"scanline 6s linear infinite",pointerEvents:"none",zIndex:1}}/>
 
         {/* Header */}
-        <div style={{padding:"14px 24px",borderBottom:"1px solid rgba(135,206,235,.1)",display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(5,14,9,.85)",backdropFilter:"blur(16px)",position:"relative",zIndex:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <div style={{filter:"drop-shadow(0 0 12px rgba(135,206,235,.4))"}}><HlaedLogo size={42}/></div>
+        <div style={{padding:"12px 16px",borderBottom:"1px solid rgba(135,206,235,.1)",display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(5,14,9,.85)",backdropFilter:"blur(16px)",position:"relative",zIndex:10,gap:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            {/* Sidebar toggle button */}
+            <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{
+              background:"rgba(135,206,235,0.06)",
+              border:"1px solid rgba(135,206,235,0.15)",
+              borderRadius:8, color:"#87ceeb",
+              width:36, height:36, display:"flex",
+              alignItems:"center", justifyContent:"center",
+              cursor:"pointer", fontSize:16, flexShrink:0,
+              transition:"all .2s",
+            }}>
+              {sidebarOpen ? "◀" : "▶"}
+            </button>
+            <div style={{filter:"drop-shadow(0 0 12px rgba(135,206,235,.4))",display:"flex"}}><HlaedLogo size={isMobile?32:42}/></div>
             <div>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:800,background:"linear-gradient(135deg,#87ceeb,#2d9e6b)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:"0.12em"}}>HLAED</div>
-              <div style={{fontSize:9,color:"#2d9e6b",letterSpacing:"0.2em",marginTop:1}}>REASONING · PLANNING · RESEARCH · AGENT</div>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:isMobile?15:20,fontWeight:800,background:"linear-gradient(135deg,#87ceeb,#2d9e6b)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:"0.1em"}}>HLAED</div>
+              {!isMobile && <div style={{fontSize:9,color:"#2d9e6b",letterSpacing:"0.2em",marginTop:1}}>REASONING · PLANNING · RESEARCH · AGENT</div>}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <div style={{width:7,height:7,borderRadius:"50%",background:(isLoading||isStreaming)?"#87ceeb":"#2d9e6b",boxShadow:`0 0 8px ${(isLoading||isStreaming)?"#87ceeb":"#2d9e6b"}`,animation:(isLoading||isStreaming)?"pulse 1s infinite":"none"}}/>
-            <span style={{fontSize:10,color:(isLoading||isStreaming)?"#87ceeb":"#2d9e6b",letterSpacing:"0.1em"}}>
+            <span style={{fontSize:10,color:(isLoading||isStreaming)?"#87ceeb":"#2d9e6b",letterSpacing:"0.08em"}}>
               {isLoading?"SEARCHING...":isStreaming?"RESPONDING...":"ONLINE"}
             </span>
           </div>
         </div>
 
         {/* Messages */}
-        <div style={{flex:1,overflowY:"auto",padding:"28px 24px",display:"flex",flexDirection:"column",position:"relative",zIndex:5,minHeight:0}}>
+        <div style={{flex:1,overflowY:"auto",padding:isMobile?"16px 12px":"28px 24px",display:"flex",flexDirection:"column",position:"relative",zIndex:5,minHeight:0}}>
           {displayMessages.length===0&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,paddingBottom:40,animation:"fadeSlideIn .5s ease forwards"}}>
               <div style={{filter:"drop-shadow(0 0 30px rgba(135,206,235,.5))"}}><HlaedLogo size={72}/></div>
@@ -850,7 +914,6 @@ export default function App() {
                 Built by Hlaed — pioneering AI & cybersecurity from India 🇮🇳
               </div>
               <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center",marginTop:4}}>
-                {suggestions.map(s=>(<button key={s} onClick={()=>setInput(s)} style={{background:"rgba(135,206,235,.06)",border:"1px solid rgba(135,206,235,.18)",borderRadius:20,color:"#87ceeb",padding:"7px 18px",fontSize:11,cursor:"pointer",letterSpacing:"0.06em",fontFamily:"'DM Mono',monospace"}}>{s}</button>))}
               </div>
             </div>
           )}
@@ -869,7 +932,7 @@ export default function App() {
         </div>
 
         {/* Input */}
-        <div style={{padding:"16px 24px",borderTop:"1px solid rgba(135,206,235,.08)",background:"rgba(5,14,9,.9)",backdropFilter:"blur(16px)",position:"relative",zIndex:10}}>
+        <div style={{padding:isMobile?"10px 12px":"16px 24px",borderTop:"1px solid rgba(135,206,235,.08)",background:"rgba(5,14,9,.9)",backdropFilter:"blur(16px)",position:"relative",zIndex:10}}>
           <div style={{display:"flex",gap:12,alignItems:"flex-end",background:"rgba(135,206,235,.04)",border:"1px solid rgba(135,206,235,.15)",borderRadius:16,padding:"10px 14px"}}>
             <textarea ref={textareaRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKeyDown}
               placeholder="Ask Hlaed anything — research, planning, flowcharts..."
