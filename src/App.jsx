@@ -758,12 +758,9 @@ export default function App() {
               fullText+=ev.text; setStreamingText(fullText);
             }
             else if (ev.type==="generate_image") {
-              // Image generation — Pollinations AI URL built from prompt
-              const imagePrompt = ev.prompt;
-              const seed = Math.floor(Math.random() * 999999);
-              const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&enhance=true`;
-              pendingImageUrl = imageUrl;
-              pendingImagePrompt = imagePrompt;
+              // Backend sends ready-made image URL and prompt
+              pendingImageUrl = ev.imageUrl;
+              pendingImagePrompt = ev.prompt;
             }
             else if (ev.type==="done") {
               setIsStreaming(false); setStreamingText(""); setSearchStatus(null);
