@@ -844,25 +844,26 @@ export default function App() {
           table{font-size:10px;}
           th,td{padding:6px 8px!important;}
         }
-        button[title]:hover::after{
-          content:attr(title);
+
+        button[data-tooltip]:hover::after{
+          content:attr(data-tooltip);
           position:absolute;
-          bottom:-30px;
+          bottom:-34px;
           left:50%;
           transform:translateX(-50%);
-          background:rgba(10,30,20,0.95);
+          background:rgba(5,20,12,0.97);
           color:#87ceeb;
           font-size:10px;
-          padding:4px 10px;
-          border-radius:6px;
+          padding:5px 12px;
+          border-radius:7px;
           white-space:nowrap;
-          border:1px solid rgba(135,206,235,0.2);
+          border:1px solid rgba(135,206,235,0.25);
           pointer-events:none;
-          z-index:999;
+          z-index:9999;
           font-family:'DM Mono',monospace;
-          letter-spacing:0.05em;
+          letter-spacing:0.06em;
+          box-shadow:0 4px 12px rgba(0,0,0,0.4);
         }
-        button[title]{position:relative;}
       `}</style>
 
       {/* Sidebar overlay for mobile */}
@@ -882,6 +883,7 @@ export default function App() {
         // On desktop: when closed, takes zero width so content expands
         width: (!isMobile && !sidebarOpen) ? 0 : "auto",
         overflow: (!isMobile && !sidebarOpen) ? "hidden" : "visible",
+        minWidth: 0,
       }}>
         <Sidebar user={user} sessions={sessions} activeSessionId={activeSessionId}
           onNewChat={()=>{ handleNewChat(); if(isMobile) setSidebarOpen(false); }}
@@ -910,7 +912,7 @@ export default function App() {
                 width:36, height:36, display:"flex",
                 alignItems:"center", justifyContent:"center",
                 cursor:"pointer", fontSize:15, flexShrink:0,
-                transition:"all .2s", position:"relative",
+                transition:"all .2s",
               }}
             >
               {sidebarOpen ? "◀" : "▶"}
