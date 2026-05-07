@@ -756,8 +756,21 @@ export default function App() {
     const history = [...messages,{role:"user",content:trimmed}];
 
     try {
-      const res = await fetch(`${API_URL}/api/chat`,{ method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:history.map(m=>({role:m.role,content:m.content}))}) });
-      if (!res.ok) throw new Error("Server error");
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 60000);
+      const res = await fetch(`${API_URL}/api/chat`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({messages:history.map(m=>({role:m.role,content:m.content}))}),
+        signal: controller.signal,
+      });
+      clearTimeout(fetchTimeout);
+      if (!res.ok) {
+        const errText = await res.text().catch(()=>"");
+        let errMsg = "Server error";
+        try { errMsg = JSON.parse(errText).error || errMsg; } catch(_) {}
+        throw new Error(errMsg);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -808,7 +821,12 @@ export default function App() {
           } catch(_) {}
         }
       }
-    } catch(err) { setError(err.message); setIsLoading(false); setIsStreaming(false); }
+    } catch(err) {
+      if (err.name==="AbortError") setError("Request timed out. Please try again.");
+      else if (err.message.includes("Failed to fetch")) setError("Cannot connect to Hlaed server. Check your internet connection.");
+      else setError(err.message||"Something went wrong. Please try again.");
+      setIsLoading(false); setIsStreaming(false);
+    }
   };
 
   const handleKeyDown = e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} };
