@@ -33,7 +33,12 @@ export default function LoginPage() {
   const handleGoogle = async () => {
     setError(""); setLoading(true);
     try { await signInWithPopup(auth, googleProvider); }
-    catch(e) { setError(e.message.replace("Firebase: ","").replace(/\(auth.*\)/,"").trim()); }
+    catch(e) {
+      const code = e.code || "";
+      if (code === "auth/popup-closed-by-user") setError("Google sign-in was cancelled.");
+      else if (code === "auth/network-request-failed") setError("Network error. Check your internet connection.");
+      else setError(e.message.replace("Firebase: ","").replace(/\(auth.*\)/,"").trim() || "Google sign-in failed.");
+    }
     finally { setLoading(false); }
   };
 
@@ -43,7 +48,17 @@ export default function LoginPage() {
     try {
       if (isSignUp) await createUserWithEmailAndPassword(auth, email, password);
       else await signInWithEmailAndPassword(auth, email, password);
-    } catch(e) { setError(e.message.replace("Firebase: ","").replace(/\(auth.*\)/,"").trim()); }
+    } catch(e) {
+      const code = e.code || "";
+      if (code === "auth/user-not-found" || code === "auth/invalid-credential") setError("Email or password is incorrect.");
+      else if (code === "auth/email-already-in-use") setError("This email is already registered. Please sign in.");
+      else if (code === "auth/weak-password") setError("Password must be at least 6 characters.");
+      else if (code === "auth/invalid-email") setError("Please enter a valid email address.");
+      else if (code === "auth/too-many-requests") setError("Too many attempts. Please try again later.");
+      else if (code === "auth/operation-not-allowed") setError("Email/Password login is not enabled. Please contact support.");
+      else if (code === "auth/network-request-failed") setError("Network error. Check your internet connection.");
+      else setError(e.message.replace("Firebase: ","").replace(/\(auth.*\)/,"").trim() || "Authentication failed.");
+    }
     finally { setLoading(false); }
   };
 
